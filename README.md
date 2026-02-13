@@ -1,6 +1,6 @@
-# Asgard - GAIA Development Tools Suite
+# Asgard - Development Tools Suite
 
-Named after the realm of the Norse gods, Asgard is GAIA's comprehensive suite of development and quality assurance tools. Like the mythical realm that houses the great halls of the Aesir, Asgard houses the tools that watch over and forge GAIA's codebase.
+Named after the realm of the Norse gods, Asgard is GAIA's comprehensive suite of development and quality assurance tools. Like the mythical realm that houses the great halls of the Aesir, Asgard houses the tools that watch over and forge a codebase.
 
 ## Subpackages
 
@@ -128,5 +128,4 @@ Asgard/
 ```
 
 ## License
-
-MIT License - GAIA Team
+MIT License
