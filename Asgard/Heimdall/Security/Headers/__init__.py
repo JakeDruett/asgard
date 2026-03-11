@@ -12,7 +12,7 @@ Usage:
     python -m Heimdall security headers ./src
 
 Example:
-    from Asgard.Heimdall.Security.Headers import HeadersAnalyzer, HeaderConfig
+    from Heimdall.Security.Headers import HeadersAnalyzer, HeaderConfig
 
     analyzer = HeadersAnalyzer(HeaderConfig(scan_path="./src"))
     report = analyzer.analyze()

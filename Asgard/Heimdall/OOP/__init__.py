@@ -14,9 +14,9 @@ Usage:
     python -m Heimdall oop cohesion ./src
 
 Programmatic Usage:
-    from Asgard.Heimdall.OOP import OOPAnalyzer, OOPConfig
-    from Asgard.Heimdall.OOP import CouplingAnalyzer, InheritanceAnalyzer
-    from Asgard.Heimdall.OOP import CohesionAnalyzer, RFCAnalyzer
+    from Heimdall.OOP import OOPAnalyzer, OOPConfig
+    from Heimdall.OOP import CouplingAnalyzer, InheritanceAnalyzer
+    from Heimdall.OOP import CohesionAnalyzer, RFCAnalyzer
 
     # Full OOP analysis
     config = OOPConfig(scan_path="./src")

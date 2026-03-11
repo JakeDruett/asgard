@@ -28,13 +28,13 @@ Usage:
     python -m Heimdall audit ./src
 
 Programmatic Usage:
-    from Asgard.Heimdall.Quality import FileAnalyzer, AnalysisConfig
-    from Asgard.Heimdall.Security import StaticSecurityService, SecurityScanConfig
-    from Asgard.Heimdall.Performance import StaticPerformanceService, PerformanceScanConfig
-    from Asgard.Heimdall.OOP import OOPAnalyzer, OOPConfig
-    from Asgard.Heimdall.Dependencies import DependencyAnalyzer, DependencyConfig
-    from Asgard.Heimdall.Architecture import ArchitectureAnalyzer, ArchitectureConfig
-    from Asgard.Heimdall.Coverage import CoverageAnalyzer, CoverageConfig
+    from Heimdall.Quality import FileAnalyzer, AnalysisConfig
+    from Heimdall.Security import StaticSecurityService, SecurityScanConfig
+    from Heimdall.Performance import StaticPerformanceService, PerformanceScanConfig
+    from Heimdall.OOP import OOPAnalyzer, OOPConfig
+    from Heimdall.Dependencies import DependencyAnalyzer, DependencyConfig
+    from Heimdall.Architecture import ArchitectureAnalyzer, ArchitectureConfig
+    from Heimdall.Coverage import CoverageAnalyzer, CoverageConfig
 
     # Quality Analysis
     config = AnalysisConfig(threshold=300)
@@ -72,7 +72,7 @@ Programmatic Usage:
     print(f"Coverage Gaps: {cov_report.total_gaps}")
 """
 
-__version__ = "1.3.0"
+__version__ = "1.5.0"
 __author__ = "Asgard Contributors"
 
 # Package metadata
@@ -90,6 +90,8 @@ PACKAGE_INFO = {
         "Architecture - SOLID validation, layer compliance, pattern detection",
         "Coverage - Test coverage gaps, test suggestions, class coverage",
         "Profiles - Quality profile management (rule sets with inheritance)",
+        "Issues - Issue lifecycle tracking (SQLite-backed, status transitions, git blame)",
+        "CodeFix - Template-based code fix suggestions for rule violations",
     ]
 }
 
@@ -104,6 +106,8 @@ from . import Coverage
 from . import Ratings
 from . import QualityGate
 from . import Profiles
+from . import Issues
+from . import CodeFix
 
 # Re-export commonly used items from Quality for convenience
 from Asgard.Heimdall.Quality import (
@@ -185,8 +189,23 @@ from Asgard.Heimdall.Profiles import (
     RuleConfig,
 )
 
+# Re-export commonly used items from Issues for convenience
+from Asgard.Heimdall.Issues import (
+    IssueStatus,
+    IssueTracker,
+    TrackedIssue,
+)
+
+# Re-export commonly used items from CodeFix for convenience
+from Asgard.Heimdall.CodeFix import (
+    CodeFixService,
+    CodeFixReport,
+    FixSuggestion,
+)
+
 __all__ = [
     # Subpackages
+    "Issues",
     "Quality",
     "Security",
     "Performance",
@@ -247,4 +266,13 @@ __all__ = [
     "ProfileManager",
     "QualityProfile",
     "RuleConfig",
+    # Issues exports
+    "IssueStatus",
+    "IssueTracker",
+    "TrackedIssue",
+    # CodeFix exports
+    "CodeFix",
+    "CodeFixReport",
+    "CodeFixService",
+    "FixSuggestion",
 ]

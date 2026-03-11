@@ -1,9 +1,15 @@
 """
-Heimdall TypeScript Analysis Models
+Heimdall TypeScript Quality Analysis Models
 
-Re-exports shared JS models for use in TypeScript analysis, and provides
-a TypeScript-specific configuration that extends the base JSAnalysisConfig
-with TypeScript-appropriate defaults.
+TypeScript analysis reuses the JS models.  This module re-exports them for
+import convenience and documents the TypeScript-specific rule IDs.
+
+TypeScript-specific rule IDs:
+- ts.no-explicit-any     : ': any' type annotation
+- ts.no-any-cast         : 'as any' cast expression
+- ts.no-non-null-assertion : Non-null assertion operator (!)
+- ts.prefer-interface    : Type alias for object shape (use interface instead)
+- ts.no-implicit-any     : Function parameter without explicit type annotation
 """
 
 from Asgard.Heimdall.Quality.languages.javascript.models.js_models import (
@@ -14,31 +20,10 @@ from Asgard.Heimdall.Quality.languages.javascript.models.js_models import (
     JSSeverity,
 )
 
-
-class TSAnalysisConfig(JSAnalysisConfig):
-    """
-    Configuration for TypeScript analysis.
-
-    Extends JSAnalysisConfig with TypeScript-appropriate default extensions
-    and sets the language field to 'typescript'.
-    """
-
-    class Config:
-        use_enum_values = True
-
-    def __init__(self, **data):
-        if "include_extensions" not in data:
-            data["include_extensions"] = [".ts", ".tsx"]
-        if "language" not in data:
-            data["language"] = "typescript"
-        super().__init__(**data)
-
-
 __all__ = [
     "JSAnalysisConfig",
     "JSFinding",
     "JSReport",
     "JSRuleCategory",
     "JSSeverity",
-    "TSAnalysisConfig",
 ]

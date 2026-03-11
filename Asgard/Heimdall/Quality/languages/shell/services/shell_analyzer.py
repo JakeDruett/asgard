@@ -1,13 +1,13 @@
 """
 Heimdall Shell Script Analyzer
 
-Regex and text-based static analysis for shell scripts (.sh, .bash, and
-files with bash/sh shebangs). Implements security, bug, style, and
-portability rules using line-by-line pattern matching.
+Performs regex-based static analysis on shell and bash script files.
+Files are discovered by extension (.sh, .bash) and optionally by shebang
+line (#!/bin/bash, #!/bin/sh, #!/usr/bin/env bash).
 """
 
+import fnmatch
 import re
-import time
 from datetime import datetime
 from pathlib import Path
 from typing import List, Optional
@@ -20,19 +20,11 @@ from Asgard.Heimdall.Quality.languages.shell.models.shell_models import (
     ShellSeverity,
 )
 
-
-_SHEBANG_PATTERNS = [
+_SHELL_SHEBANGS = (
     "#!/bin/bash",
     "#!/bin/sh",
     "#!/usr/bin/env bash",
-    "#!/usr/bin/env sh",
-]
-
-
-def _has_shell_shebang(content: str) -> bool:
-    """Return True if the first line of content is a recognised bash/sh shebang."""
-    first_line = content.split("\n", 1)[0].strip()
-    return any(first_line.startswith(shebang) for shebang in _SHEBANG_PATTERNS)
+)
 
 
 def _make_finding(
@@ -46,7 +38,7 @@ def _make_finding(
     code_snippet: str = "",
     fix_suggestion: str = "",
 ) -> ShellFinding:
-    """Helper to construct a ShellFinding with consistent field population."""
+    """Construct a ShellFinding with consistent defaults."""
     return ShellFinding(
         file_path=file_path,
         line_number=line_number,
@@ -55,586 +47,414 @@ def _make_finding(
         severity=severity,
         title=title,
         description=description,
-        code_snippet=code_snippet.strip(),
+        code_snippet=code_snippet.rstrip(),
         fix_suggestion=fix_suggestion,
     )
 
 
 class ShellAnalyzer:
     """
-    Regex-based static analyzer for shell scripts.
+    Regex-based static analyzer for shell script files.
 
-    Detects security vulnerabilities, common bugs, style issues, and
-    portability problems in bash and sh scripts.
-
-    Usage:
-        config = ShellAnalysisConfig(scan_path=Path("./scripts"))
-        analyzer = ShellAnalyzer(config)
-        report = analyzer.analyze(Path("./scripts"))
+    Each public rule method returns a list of ShellFinding objects for a
+    single file.  The top-level analyze() method discovers files, runs all
+    enabled rules, and returns an aggregated ShellReport.
     """
 
-    def __init__(self, config: Optional[ShellAnalysisConfig] = None):
-        """
-        Initialise the shell analyzer.
-
-        Args:
-            config: Analysis configuration. Defaults to ShellAnalysisConfig() with default values.
-        """
+    def __init__(self, config: Optional[ShellAnalysisConfig] = None) -> None:
         self._config = config or ShellAnalysisConfig()
 
-    def analyze(self, scan_path: Optional[Path] = None) -> ShellReport:
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
+
+    def analyze(self, scan_path: Optional[str] = None) -> ShellReport:
         """
-        Scan a directory tree for shell scripts and apply all enabled rules.
+        Analyze all matching shell script files under scan_path.
 
         Args:
-            scan_path: Root path to scan. Falls back to config.scan_path.
+            scan_path: Optional override for the config scan path.
 
         Returns:
             ShellReport containing all findings.
         """
-        root = Path(scan_path) if scan_path else self._config.scan_path
-        root = root.resolve()
+        start = datetime.now()
+        root = Path(scan_path).resolve() if scan_path else self._config.scan_path.resolve()
+        report = ShellReport(scan_path=str(root))
 
-        start_time = time.monotonic()
-        report = ShellReport(
-            scan_path=str(root),
-            scanned_at=datetime.now(),
-        )
+        files = self._discover_files(root)
+        report.files_analyzed = len(files)
 
-        files = self._collect_files(root)
         for file_path in files:
-            findings = self._analyze_file(file_path)
-            for finding in findings:
+            try:
+                source_lines = Path(file_path).read_text(encoding="utf-8", errors="replace").splitlines()
+            except OSError:
+                continue
+
+            for finding in self._analyze_file(str(file_path), source_lines):
                 report.add_finding(finding)
 
-        report.files_analyzed = len(files)
-        report.scan_duration_seconds = time.monotonic() - start_time
+        report.scan_duration_seconds = (datetime.now() - start).total_seconds()
         return report
 
-    def _collect_files(self, root: Path) -> List[Path]:
-        """Collect all shell files: by extension, and optionally by shebang."""
-        exclude = self._config.exclude_patterns
-        collected: List[Path] = []
-        seen: set = set()
+    # ------------------------------------------------------------------
+    # File discovery
+    # ------------------------------------------------------------------
+
+    def _discover_files(self, root: Path) -> List[Path]:
+        """Return all shell script files matching extensions or shebang."""
+        results: set = set()
 
         for ext in self._config.include_extensions:
-            for file_path in root.rglob(f"*{ext}"):
-                path_str = str(file_path)
-                if any(pattern in path_str for pattern in exclude):
-                    continue
-                if path_str not in seen:
-                    seen.add(path_str)
-                    collected.append(file_path)
+            for candidate in root.rglob(f"*{ext}"):
+                if not self._is_excluded(candidate):
+                    results.add(candidate)
 
         if self._config.also_check_shebangs:
-            for file_path in root.rglob("*"):
-                if not file_path.is_file():
-                    continue
-                path_str = str(file_path)
-                if path_str in seen:
-                    continue
-                if any(pattern in path_str for pattern in exclude):
-                    continue
-                # Only check files with no extension
-                if file_path.suffix:
-                    continue
-                try:
-                    content = file_path.read_text(encoding="utf-8", errors="replace")
-                    if _has_shell_shebang(content):
-                        seen.add(path_str)
-                        collected.append(file_path)
-                except OSError:
-                    continue
+            for candidate in root.rglob("*"):
+                if candidate.is_file() and not self._is_excluded(candidate):
+                    if candidate.suffix not in self._config.include_extensions:
+                        if self._has_shell_shebang(candidate):
+                            results.add(candidate)
 
-        return sorted(collected)
+        return sorted(results)
 
-    def _analyze_file(self, file_path: Path) -> List[ShellFinding]:
-        """Run all enabled rules against a single shell file."""
+    def _has_shell_shebang(self, path: Path) -> bool:
+        """Return True if the first line of the file is a recognized shell shebang."""
         try:
-            content = file_path.read_text(encoding="utf-8", errors="replace")
-        except OSError:
-            return []
+            first_line = path.read_text(encoding="utf-8", errors="replace").splitlines()[0]
+            return any(first_line.startswith(shebang) for shebang in _SHELL_SHEBANGS)
+        except (OSError, IndexError):
+            return False
 
-        lines = content.splitlines()
-        path_str = str(file_path)
+    def _is_excluded(self, path: Path) -> bool:
+        """Return True if the path matches any exclusion pattern."""
+        parts = path.parts
+        for pattern in self._config.exclude_patterns:
+            for part in parts:
+                if fnmatch.fnmatch(part, pattern):
+                    return True
+        return False
+
+    def _is_rule_enabled(self, rule_id: str) -> bool:
+        """Return True when the rule should be executed."""
+        if rule_id in self._config.disabled_rules:
+            return False
+        if self._config.enabled_rules is not None:
+            return rule_id in self._config.enabled_rules
+        return True
+
+    # ------------------------------------------------------------------
+    # Per-file analysis dispatch
+    # ------------------------------------------------------------------
+
+    def _analyze_file(self, file_path: str, lines: List[str]) -> List[ShellFinding]:
+        """Run all enabled rules against a single file's source lines."""
         findings: List[ShellFinding] = []
-
-        # Security rules
-        findings.extend(self._rule_eval_injection(path_str, lines))
-        findings.extend(self._rule_unquoted_variable_in_command(path_str, lines))
-        findings.extend(self._rule_curl_insecure(path_str, lines))
-        findings.extend(self._rule_wget_no_check(path_str, lines))
-        findings.extend(self._rule_hardcoded_password(path_str, lines))
-        findings.extend(self._rule_command_injection(path_str, lines))
-        findings.extend(self._rule_sudo_without_sudoers(path_str, lines))
-
-        # Bug rules
-        findings.extend(self._rule_unquoted_variable(path_str, lines))
-        findings.extend(self._rule_use_dollar_star(path_str, lines))
-        findings.extend(self._rule_missing_exit_on_error(path_str, content))
-        findings.extend(self._rule_missing_unset_error(path_str, content))
-        findings.extend(self._rule_cd_without_check(path_str, lines))
-        findings.extend(self._rule_comparison_without_brackets(path_str, lines))
-
-        # Style rules
-        findings.extend(self._rule_use_double_brackets(path_str, lines))
-        findings.extend(self._rule_function_definition(path_str, lines))
-        findings.extend(self._rule_trailing_whitespace(path_str, lines))
-        findings.extend(self._rule_long_line(path_str, lines))
-
+        findings.extend(self._check_eval_injection(file_path, lines))
+        findings.extend(self._check_curl_insecure(file_path, lines))
+        findings.extend(self._check_wget_no_check(file_path, lines))
+        findings.extend(self._check_hardcoded_secret(file_path, lines))
+        findings.extend(self._check_sudo_usage(file_path, lines))
+        findings.extend(self._check_missing_set_e(file_path, lines))
+        findings.extend(self._check_missing_set_u(file_path, lines))
+        findings.extend(self._check_cd_without_check(file_path, lines))
+        findings.extend(self._check_unquoted_dollar_star(file_path, lines))
+        findings.extend(self._check_trailing_whitespace(file_path, lines))
+        findings.extend(self._check_max_line_length(file_path, lines))
+        findings.extend(self._check_function_keyword(file_path, lines))
         return findings
 
-    # --- Security Rules ---
+    # ------------------------------------------------------------------
+    # Security rules
+    # ------------------------------------------------------------------
 
-    def _rule_eval_injection(self, file_path: str, lines: List[str]) -> List[ShellFinding]:
-        """shell.eval-injection: eval with a variable — potential code injection."""
-        if not self._config.is_rule_enabled("shell.eval-injection"):
+    def _check_eval_injection(self, file_path: str, lines: List[str]) -> List[ShellFinding]:
+        """shell.eval-injection: eval with a variable argument."""
+        if not self._is_rule_enabled("shell.eval-injection"):
             return []
-        findings = []
-        pattern = re.compile(r'\beval\s+\$')
-        for i, line in enumerate(lines, start=1):
-            stripped = line.strip()
-            if stripped.startswith("#"):
-                continue
+        findings: List[ShellFinding] = []
+        pattern = re.compile(r"\beval\s+\$")
+        for idx, line in enumerate(lines, start=1):
             if pattern.search(line):
                 findings.append(_make_finding(
                     file_path=file_path,
-                    line_number=i,
+                    line_number=idx,
                     rule_id="shell.eval-injection",
                     category=ShellRuleCategory.SECURITY,
                     severity=ShellSeverity.ERROR,
-                    title="eval with variable input (potential injection)",
-                    description=(
-                        "Using eval with a variable can execute arbitrary code if the variable "
-                        "contains attacker-controlled input."
-                    ),
+                    title="eval with variable argument (code injection risk)",
+                    description="Using eval with a variable can execute arbitrary code if the variable is user-controlled.",
                     code_snippet=line,
-                    fix_suggestion="Avoid eval entirely. Refactor to use functions or arrays instead.",
+                    fix_suggestion="Avoid eval. Refactor to use explicit commands or arrays.",
                 ))
         return findings
 
-    def _rule_unquoted_variable_in_command(self, file_path: str, lines: List[str]) -> List[ShellFinding]:
-        """shell.unquoted-variable-in-command: Unquoted variable in rm -rf command."""
-        if not self._config.is_rule_enabled("shell.unquoted-variable-in-command"):
-            return []
-        findings = []
-        # rm -rf $VAR without quotes
-        pattern = re.compile(r'\brm\b.*\$[A-Za-z_][A-Za-z0-9_]*\b(?!\s*")')
-        for i, line in enumerate(lines, start=1):
-            stripped = line.strip()
-            if stripped.startswith("#"):
-                continue
-            if pattern.search(line):
-                # Make sure the variable is not quoted
-                if '"$' not in line:
-                    findings.append(_make_finding(
-                        file_path=file_path,
-                        line_number=i,
-                        rule_id="shell.unquoted-variable-in-command",
-                        category=ShellRuleCategory.SECURITY,
-                        severity=ShellSeverity.WARNING,
-                        title="Unquoted variable in rm command",
-                        description=(
-                            "Using an unquoted variable with rm can cause word splitting or "
-                            "unexpected file deletion if the variable contains spaces or globs."
-                        ),
-                        code_snippet=line,
-                        fix_suggestion='Quote the variable: rm -rf "$DIR".',
-                    ))
-        return findings
-
-    def _rule_curl_insecure(self, file_path: str, lines: List[str]) -> List[ShellFinding]:
+    def _check_curl_insecure(self, file_path: str, lines: List[str]) -> List[ShellFinding]:
         """shell.curl-insecure: curl with -k or --insecure flag."""
-        if not self._config.is_rule_enabled("shell.curl-insecure"):
+        if not self._is_rule_enabled("shell.curl-insecure"):
             return []
-        findings = []
-        pattern = re.compile(r'\bcurl\b.*(?:-k\b|--insecure\b)')
-        for i, line in enumerate(lines, start=1):
-            stripped = line.strip()
-            if stripped.startswith("#"):
-                continue
+        findings: List[ShellFinding] = []
+        pattern = re.compile(r"curl\s+.*(-k\b|--insecure)")
+        for idx, line in enumerate(lines, start=1):
             if pattern.search(line):
                 findings.append(_make_finding(
                     file_path=file_path,
-                    line_number=i,
+                    line_number=idx,
                     rule_id="shell.curl-insecure",
                     category=ShellRuleCategory.SECURITY,
                     severity=ShellSeverity.WARNING,
-                    title="curl with TLS verification disabled",
-                    description=(
-                        "Using curl -k or --insecure disables TLS certificate verification, "
-                        "making the connection vulnerable to man-in-the-middle attacks."
-                    ),
+                    title="curl called with TLS verification disabled",
+                    description="Using -k or --insecure disables TLS certificate verification and is a security risk.",
                     code_snippet=line,
-                    fix_suggestion="Remove -k/--insecure and ensure the server certificate is valid.",
+                    fix_suggestion="Remove the -k/--insecure flag and use a proper certificate bundle.",
                 ))
         return findings
 
-    def _rule_wget_no_check(self, file_path: str, lines: List[str]) -> List[ShellFinding]:
+    def _check_wget_no_check(self, file_path: str, lines: List[str]) -> List[ShellFinding]:
         """shell.wget-no-check: wget with --no-check-certificate."""
-        if not self._config.is_rule_enabled("shell.wget-no-check"):
+        if not self._is_rule_enabled("shell.wget-no-check"):
             return []
-        findings = []
-        pattern = re.compile(r'\bwget\b.*--no-check-certificate\b')
-        for i, line in enumerate(lines, start=1):
-            stripped = line.strip()
-            if stripped.startswith("#"):
-                continue
+        findings: List[ShellFinding] = []
+        pattern = re.compile(r"wget\s+.*--no-check-certificate")
+        for idx, line in enumerate(lines, start=1):
             if pattern.search(line):
                 findings.append(_make_finding(
                     file_path=file_path,
-                    line_number=i,
+                    line_number=idx,
                     rule_id="shell.wget-no-check",
                     category=ShellRuleCategory.SECURITY,
                     severity=ShellSeverity.WARNING,
-                    title="wget with certificate verification disabled",
-                    description=(
-                        "Using wget --no-check-certificate disables TLS certificate verification, "
-                        "making the connection vulnerable to man-in-the-middle attacks."
-                    ),
+                    title="wget called with certificate verification disabled",
+                    description="--no-check-certificate disables TLS certificate verification.",
                     code_snippet=line,
-                    fix_suggestion="Remove --no-check-certificate and ensure the server certificate is valid.",
+                    fix_suggestion="Remove --no-check-certificate and use a proper certificate bundle.",
                 ))
         return findings
 
-    def _rule_hardcoded_password(self, file_path: str, lines: List[str]) -> List[ShellFinding]:
-        """shell.hardcoded-password: Sensitive variable assigned a literal value."""
-        if not self._config.is_rule_enabled("shell.hardcoded-password"):
+    def _check_hardcoded_secret(self, file_path: str, lines: List[str]) -> List[ShellFinding]:
+        """shell.hardcoded-secret: credential variable assigned a literal string."""
+        if not self._is_rule_enabled("shell.hardcoded-secret"):
             return []
-        findings = []
+        findings: List[ShellFinding] = []
         pattern = re.compile(
-            r'\b(?:PASSWORD|PASSWD|SECRET|API_KEY|TOKEN|PRIVATE_KEY)\s*=\s*(?!"\$|\'?\$)["\']?[^$\s\'"][^\s]*'
+            r"(PASSWORD|PASSWD|SECRET|API_KEY|TOKEN)\s*=\s*['\"][^'\"]+['\"]\s*$",
+            re.IGNORECASE,
         )
-        for i, line in enumerate(lines, start=1):
-            stripped = line.strip()
-            if stripped.startswith("#"):
-                continue
+        for idx, line in enumerate(lines, start=1):
             if pattern.search(line):
                 findings.append(_make_finding(
                     file_path=file_path,
-                    line_number=i,
-                    rule_id="shell.hardcoded-password",
-                    category=ShellRuleCategory.SECURITY,
-                    severity=ShellSeverity.ERROR,
-                    title="Hardcoded credential or secret",
-                    description=(
-                        "A sensitive variable appears to be assigned a hardcoded literal value. "
-                        "Credentials should never be hardcoded in scripts."
-                    ),
-                    code_snippet=line,
-                    fix_suggestion="Read credentials from environment variables or a secrets manager.",
-                ))
-        return findings
-
-    def _rule_command_injection(self, file_path: str, lines: List[str]) -> List[ShellFinding]:
-        """shell.command-injection: Backtick command substitution with variable input."""
-        if not self._config.is_rule_enabled("shell.command-injection"):
-            return []
-        findings = []
-        # Backtick substitution containing a variable
-        pattern = re.compile(r'`[^`]*\$[A-Za-z_][A-Za-z0-9_]*[^`]*`')
-        for i, line in enumerate(lines, start=1):
-            stripped = line.strip()
-            if stripped.startswith("#"):
-                continue
-            if pattern.search(line):
-                findings.append(_make_finding(
-                    file_path=file_path,
-                    line_number=i,
-                    rule_id="shell.command-injection",
+                    line_number=idx,
+                    rule_id="shell.hardcoded-secret",
                     category=ShellRuleCategory.SECURITY,
                     severity=ShellSeverity.WARNING,
-                    title="Backtick command substitution with variable",
+                    title="Hardcoded credential or secret value",
                     description=(
-                        "Using backtick command substitution with variable input can lead to "
-                        "command injection if the variable contains attacker-controlled data."
+                        "A variable with a sensitive name is assigned a string literal. "
+                        "Hardcoded secrets should never be stored in source code."
                     ),
                     code_snippet=line,
-                    fix_suggestion="Use $(command) instead of backticks and validate/sanitize input variables.",
+                    fix_suggestion="Read secrets from environment variables or a secrets manager.",
                 ))
         return findings
 
-    def _rule_sudo_without_sudoers(self, file_path: str, lines: List[str]) -> List[ShellFinding]:
-        """shell.sudo-without-sudoers: sudo usage flagged for review."""
-        if not self._config.is_rule_enabled("shell.sudo-without-sudoers"):
+    def _check_sudo_usage(self, file_path: str, lines: List[str]) -> List[ShellFinding]:
+        """shell.sudo-usage: use of sudo."""
+        if not self._is_rule_enabled("shell.sudo-usage"):
             return []
-        findings = []
-        pattern = re.compile(r'\bsudo\s+')
-        for i, line in enumerate(lines, start=1):
-            stripped = line.strip()
+        findings: List[ShellFinding] = []
+        pattern = re.compile(r"\bsudo\s+")
+        for idx, line in enumerate(lines, start=1):
+            # Skip comment lines
+            stripped = line.lstrip()
             if stripped.startswith("#"):
                 continue
             if pattern.search(line):
                 findings.append(_make_finding(
                     file_path=file_path,
-                    line_number=i,
-                    rule_id="shell.sudo-without-sudoers",
+                    line_number=idx,
+                    rule_id="shell.sudo-usage",
                     category=ShellRuleCategory.SECURITY,
                     severity=ShellSeverity.INFO,
-                    title="sudo usage requires review",
-                    description=(
-                        "Script uses sudo. Ensure the command is safe, necessary, and that "
-                        "sudoers permissions are properly configured."
-                    ),
+                    title="Use of sudo",
+                    description="sudo grants elevated privileges. Ensure this is intentional and necessary.",
                     code_snippet=line,
-                    fix_suggestion="Review sudo usage and ensure it is limited to the minimum required privileges.",
+                    fix_suggestion="Document why elevated privileges are required or find an alternative.",
                 ))
         return findings
 
-    # --- Bug Rules ---
+    # ------------------------------------------------------------------
+    # Bug rules
+    # ------------------------------------------------------------------
 
-    def _rule_unquoted_variable(self, file_path: str, lines: List[str]) -> List[ShellFinding]:
-        """shell.unquoted-variable: Variable used without double quotes (word splitting risk)."""
-        if not self._config.is_rule_enabled("shell.unquoted-variable"):
+    def _check_missing_set_e(self, file_path: str, lines: List[str]) -> List[ShellFinding]:
+        """shell.missing-set-e: file has no 'set -e' or 'set -o errexit'."""
+        if not self._is_rule_enabled("shell.missing-set-e"):
             return []
-        findings = []
-        # Match $VAR not preceded or followed by quotes in common argument positions
-        # Simple heuristic: $VAR at start of a word that is not inside "..."
-        pattern = re.compile(r'(?<!")(?<!\$)\$[A-Za-z_][A-Za-z0-9_]*\b(?!")')
-        for i, line in enumerate(lines, start=1):
-            stripped = line.strip()
+        source = "\n".join(lines)
+        has_set_e = bool(re.search(r"set\s+-[a-z]*e[a-z]*", source)) or bool(
+            re.search(r"set\s+-o\s+errexit", source)
+        )
+        if not has_set_e:
+            return [_make_finding(
+                file_path=file_path,
+                line_number=1,
+                rule_id="shell.missing-set-e",
+                category=ShellRuleCategory.BUG,
+                severity=ShellSeverity.INFO,
+                title="Missing 'set -e' (errexit)",
+                description=(
+                    "Without 'set -e', the script will continue executing after a command fails, "
+                    "potentially producing incorrect results silently."
+                ),
+                fix_suggestion="Add 'set -e' or 'set -o errexit' near the top of the script.",
+            )]
+        return []
+
+    def _check_missing_set_u(self, file_path: str, lines: List[str]) -> List[ShellFinding]:
+        """shell.missing-set-u: file has no 'set -u' or 'set -o nounset'."""
+        if not self._is_rule_enabled("shell.missing-set-u"):
+            return []
+        source = "\n".join(lines)
+        has_set_u = bool(re.search(r"set\s+-[a-z]*u[a-z]*", source)) or bool(
+            re.search(r"set\s+-o\s+nounset", source)
+        )
+        if not has_set_u:
+            return [_make_finding(
+                file_path=file_path,
+                line_number=1,
+                rule_id="shell.missing-set-u",
+                category=ShellRuleCategory.BUG,
+                severity=ShellSeverity.INFO,
+                title="Missing 'set -u' (nounset)",
+                description=(
+                    "Without 'set -u', unset variables expand to an empty string silently, "
+                    "which can lead to data loss (e.g., 'rm -rf /$UNSET_VAR')."
+                ),
+                fix_suggestion="Add 'set -u' or 'set -o nounset' near the top of the script.",
+            )]
+        return []
+
+    def _check_cd_without_check(self, file_path: str, lines: List[str]) -> List[ShellFinding]:
+        """shell.cd-without-check: cd not followed by || or &&."""
+        if not self._is_rule_enabled("shell.cd-without-check"):
+            return []
+        findings: List[ShellFinding] = []
+        # Match cd commands not followed by || or &&
+        # Line ends without a pipe/ampersand continuation
+        pattern = re.compile(r"\bcd\s+[^|&;]*$")
+        for idx, line in enumerate(lines, start=1):
+            stripped = line.lstrip()
             if stripped.startswith("#"):
-                continue
-            # Skip lines that are purely variable assignments
-            if re.match(r'^[A-Za-z_][A-Za-z0-9_]*=', stripped):
                 continue
             if pattern.search(line):
                 findings.append(_make_finding(
                     file_path=file_path,
-                    line_number=i,
-                    rule_id="shell.unquoted-variable",
-                    category=ShellRuleCategory.BUG,
-                    severity=ShellSeverity.WARNING,
-                    title="Unquoted variable reference",
-                    description=(
-                        "Unquoted variables are subject to word splitting and glob expansion, "
-                        "which can cause unexpected behavior."
-                    ),
-                    code_snippet=line,
-                    fix_suggestion='Quote the variable: "$VAR" instead of $VAR.',
-                ))
-        return findings
-
-    def _rule_use_dollar_star(self, file_path: str, lines: List[str]) -> List[ShellFinding]:
-        """shell.use-dollar-star: $* instead of "$@" loses argument boundaries."""
-        if not self._config.is_rule_enabled("shell.use-dollar-star"):
-            return []
-        findings = []
-        pattern = re.compile(r'\$\*')
-        for i, line in enumerate(lines, start=1):
-            stripped = line.strip()
-            if stripped.startswith("#"):
-                continue
-            if pattern.search(line):
-                findings.append(_make_finding(
-                    file_path=file_path,
-                    line_number=i,
-                    rule_id="shell.use-dollar-star",
-                    category=ShellRuleCategory.BUG,
-                    severity=ShellSeverity.WARNING,
-                    title="Use of $* instead of \"$@\"",
-                    description=(
-                        '$* does not preserve argument boundaries with spaces. '
-                        'Use "$@" to correctly pass all arguments.'
-                    ),
-                    code_snippet=line,
-                    fix_suggestion='Replace $* with "$@".',
-                ))
-        return findings
-
-    def _rule_missing_exit_on_error(self, file_path: str, content: str) -> List[ShellFinding]:
-        """shell.missing-exit-on-error: Script does not have set -e or set -o errexit."""
-        if not self._config.is_rule_enabled("shell.missing-exit-on-error"):
-            return []
-        errexit_pattern = re.compile(r'\bset\s+.*-[a-zA-Z]*e[a-zA-Z]*\b|\bset\s+-o\s+errexit\b')
-        if not errexit_pattern.search(content):
-            return [_make_finding(
-                file_path=file_path,
-                line_number=1,
-                rule_id="shell.missing-exit-on-error",
-                category=ShellRuleCategory.BUG,
-                severity=ShellSeverity.INFO,
-                title="Missing set -e (exit on error)",
-                description=(
-                    "Script does not use 'set -e' or 'set -o errexit'. Without this, "
-                    "failed commands are silently ignored."
-                ),
-                code_snippet="",
-                fix_suggestion="Add 'set -e' near the top of the script after the shebang.",
-            )]
-        return []
-
-    def _rule_missing_unset_error(self, file_path: str, content: str) -> List[ShellFinding]:
-        """shell.missing-unset-error: Script does not have set -u or set -o nounset."""
-        if not self._config.is_rule_enabled("shell.missing-unset-error"):
-            return []
-        nounset_pattern = re.compile(r'\bset\s+.*-[a-zA-Z]*u[a-zA-Z]*\b|\bset\s+-o\s+nounset\b')
-        if not nounset_pattern.search(content):
-            return [_make_finding(
-                file_path=file_path,
-                line_number=1,
-                rule_id="shell.missing-unset-error",
-                category=ShellRuleCategory.BUG,
-                severity=ShellSeverity.INFO,
-                title="Missing set -u (treat unset variables as errors)",
-                description=(
-                    "Script does not use 'set -u' or 'set -o nounset'. Without this, "
-                    "references to unset variables expand to empty string silently."
-                ),
-                code_snippet="",
-                fix_suggestion="Add 'set -u' near the top of the script after the shebang.",
-            )]
-        return []
-
-    def _rule_cd_without_check(self, file_path: str, lines: List[str]) -> List[ShellFinding]:
-        """shell.cd-without-check: cd command without error handling."""
-        if not self._config.is_rule_enabled("shell.cd-without-check"):
-            return []
-        findings = []
-        # cd without || or && following it on the same line
-        cd_pattern = re.compile(r'\bcd\s+\S')
-        safe_cd_pattern = re.compile(r'\bcd\s+.*(?:\|\||&&|;)')
-        for i, line in enumerate(lines, start=1):
-            stripped = line.strip()
-            if stripped.startswith("#"):
-                continue
-            if cd_pattern.search(line) and not safe_cd_pattern.search(line):
-                findings.append(_make_finding(
-                    file_path=file_path,
-                    line_number=i,
+                    line_number=idx,
                     rule_id="shell.cd-without-check",
                     category=ShellRuleCategory.BUG,
                     severity=ShellSeverity.WARNING,
                     title="cd without error check",
                     description=(
-                        "If cd fails, subsequent commands will run in the wrong directory. "
-                        "Always check cd return value."
+                        "If cd fails (e.g., directory does not exist), subsequent commands will run "
+                        "in the wrong directory. Always check the return value of cd."
                     ),
                     code_snippet=line,
-                    fix_suggestion="Use: cd /path || exit 1  or  cd /path && do_something.",
+                    fix_suggestion="Use 'cd /some/path || exit 1' or 'cd /some/path || { echo \"fail\"; exit 1; }'.",
                 ))
         return findings
 
-    def _rule_comparison_without_brackets(self, file_path: str, lines: List[str]) -> List[ShellFinding]:
-        """shell.comparison-without-brackets: if condition without [ ] or [[ ]]."""
-        if not self._config.is_rule_enabled("shell.comparison-without-brackets"):
+    def _check_unquoted_dollar_star(self, file_path: str, lines: List[str]) -> List[ShellFinding]:
+        """shell.unquoted-dollar-star: $* not inside double quotes."""
+        if not self._is_rule_enabled("shell.unquoted-dollar-star"):
             return []
-        findings = []
-        # if $var == value without brackets
-        pattern = re.compile(r'\bif\s+\$[A-Za-z_][A-Za-z0-9_]*\s*[=!<>]')
-        for i, line in enumerate(lines, start=1):
-            stripped = line.strip()
-            if stripped.startswith("#"):
-                continue
+        findings: List[ShellFinding] = []
+        # Simple heuristic: flag $* that is not directly preceded by a double quote
+        pattern = re.compile(r'(?<!")\$\*(?!")')
+        for idx, line in enumerate(lines, start=1):
             if pattern.search(line):
                 findings.append(_make_finding(
                     file_path=file_path,
-                    line_number=i,
-                    rule_id="shell.comparison-without-brackets",
+                    line_number=idx,
+                    rule_id="shell.unquoted-dollar-star",
                     category=ShellRuleCategory.BUG,
-                    severity=ShellSeverity.ERROR,
-                    title="Comparison without test brackets",
+                    severity=ShellSeverity.WARNING,
+                    title="Unquoted $*",
                     description=(
-                        "String comparison outside [ ] or [[ ]] does not work as expected in shell."
+                        "Unquoted $* causes word splitting and glob expansion. "
+                        "Use \"$@\" to preserve argument boundaries."
                     ),
                     code_snippet=line,
-                    fix_suggestion='Use: if [[ "$VAR" == "value" ]]; then',
+                    fix_suggestion='Replace $* with "$@" to correctly handle arguments with spaces.',
                 ))
         return findings
 
-    # --- Style Rules ---
+    # ------------------------------------------------------------------
+    # Style / Portability rules
+    # ------------------------------------------------------------------
 
-    def _rule_use_double_brackets(self, file_path: str, lines: List[str]) -> List[ShellFinding]:
-        """shell.use-double-brackets: [ ] instead of [[ ]] for conditionals."""
-        if not self._config.is_rule_enabled("shell.use-double-brackets"):
+    def _check_trailing_whitespace(self, file_path: str, lines: List[str]) -> List[ShellFinding]:
+        """shell.trailing-whitespace: lines with trailing whitespace."""
+        if not self._is_rule_enabled("shell.trailing-whitespace"):
             return []
-        findings = []
-        # Match single bracket test: if [ or while [  but not [[
-        pattern = re.compile(r'\bif\s+\[(?!\[)|\bwhile\s+\[(?!\[)')
-        for i, line in enumerate(lines, start=1):
-            stripped = line.strip()
-            if stripped.startswith("#"):
-                continue
+        findings: List[ShellFinding] = []
+        pattern = re.compile(r"\s+$")
+        for idx, line in enumerate(lines, start=1):
             if pattern.search(line):
                 findings.append(_make_finding(
                     file_path=file_path,
-                    line_number=i,
-                    rule_id="shell.use-double-brackets",
-                    category=ShellRuleCategory.STYLE,
-                    severity=ShellSeverity.INFO,
-                    title="Use [[ ]] instead of [ ] for conditionals",
-                    description=(
-                        "The [[ ]] construct is safer and more powerful than [ ]. "
-                        "It handles word splitting and provides regex matching."
-                    ),
-                    code_snippet=line,
-                    fix_suggestion="Replace [ condition ] with [[ condition ]].",
-                ))
-        return findings
-
-    def _rule_function_definition(self, file_path: str, lines: List[str]) -> List[ShellFinding]:
-        """shell.function-definition: Using 'function foo()' instead of 'foo()' (non-POSIX)."""
-        if not self._config.is_rule_enabled("shell.function-definition"):
-            return []
-        findings = []
-        pattern = re.compile(r'^\s*function\s+\w+\s*\(\s*\)')
-        for i, line in enumerate(lines, start=1):
-            stripped = line.strip()
-            if stripped.startswith("#"):
-                continue
-            if pattern.match(line):
-                findings.append(_make_finding(
-                    file_path=file_path,
-                    line_number=i,
-                    rule_id="shell.function-definition",
-                    category=ShellRuleCategory.PORTABILITY,
-                    severity=ShellSeverity.INFO,
-                    title="Non-POSIX function definition style",
-                    description=(
-                        "The 'function foo()' syntax is a bashism. For POSIX portability use 'foo()' instead."
-                    ),
-                    code_snippet=line,
-                    fix_suggestion="Replace 'function foo()' with 'foo()'.",
-                ))
-        return findings
-
-    def _rule_trailing_whitespace(self, file_path: str, lines: List[str]) -> List[ShellFinding]:
-        """shell.trailing-whitespace: Lines with trailing whitespace."""
-        if not self._config.is_rule_enabled("shell.trailing-whitespace"):
-            return []
-        findings = []
-        for i, line in enumerate(lines, start=1):
-            if line != line.rstrip() and line.rstrip():
-                findings.append(_make_finding(
-                    file_path=file_path,
-                    line_number=i,
+                    line_number=idx,
                     rule_id="shell.trailing-whitespace",
                     category=ShellRuleCategory.STYLE,
                     severity=ShellSeverity.INFO,
                     title="Trailing whitespace",
-                    description="Line has trailing whitespace characters.",
+                    description="This line has trailing whitespace characters.",
                     code_snippet=line,
                     fix_suggestion="Remove trailing whitespace.",
                 ))
         return findings
 
-    def _rule_long_line(self, file_path: str, lines: List[str]) -> List[ShellFinding]:
-        """shell.long-line: Lines exceeding 120 characters."""
-        if not self._config.is_rule_enabled("shell.long-line"):
+    def _check_max_line_length(self, file_path: str, lines: List[str]) -> List[ShellFinding]:
+        """shell.max-line-length: lines exceeding 120 characters."""
+        if not self._is_rule_enabled("shell.max-line-length"):
             return []
-        findings = []
-        max_length = 120
-        for i, line in enumerate(lines, start=1):
-            if len(line.rstrip()) > max_length:
+        findings: List[ShellFinding] = []
+        for idx, line in enumerate(lines, start=1):
+            if len(line) > 120:
                 findings.append(_make_finding(
                     file_path=file_path,
-                    line_number=i,
-                    rule_id="shell.long-line",
+                    line_number=idx,
+                    rule_id="shell.max-line-length",
                     category=ShellRuleCategory.STYLE,
                     severity=ShellSeverity.INFO,
-                    title="Line too long",
-                    description=f"Line is {len(line.rstrip())} characters, exceeding the 120-character limit.",
+                    title=f"Line exceeds 120 characters ({len(line)} chars)",
+                    description=f"This line is {len(line)} characters long, exceeding the 120-character limit.",
                     code_snippet=line[:120] + "...",
-                    fix_suggestion="Break the line using line continuation (\\) or restructure the command.",
+                    fix_suggestion="Break the line with a backslash continuation or refactor the command.",
+                ))
+        return findings
+
+    def _check_function_keyword(self, file_path: str, lines: List[str]) -> List[ShellFinding]:
+        """shell.function-keyword: non-POSIX 'function' keyword used."""
+        if not self._is_rule_enabled("shell.function-keyword"):
+            return []
+        findings: List[ShellFinding] = []
+        pattern = re.compile(r"\bfunction\s+\w+\s*\(\)")
+        for idx, line in enumerate(lines, start=1):
+            if pattern.search(line):
+                findings.append(_make_finding(
+                    file_path=file_path,
+                    line_number=idx,
+                    rule_id="shell.function-keyword",
+                    category=ShellRuleCategory.PORTABILITY,
+                    severity=ShellSeverity.INFO,
+                    title="Non-POSIX 'function' keyword",
+                    description=(
+                        "The 'function' keyword is a bash extension and not POSIX-compliant. "
+                        "Scripts intended to be portable should use the 'name() {}' syntax instead."
+                    ),
+                    code_snippet=line,
+                    fix_suggestion="Replace 'function foo()' with 'foo()'.",
                 ))
         return findings

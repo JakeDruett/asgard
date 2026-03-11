@@ -14,8 +14,8 @@ Usage:
     python -m Heimdall deps modularity ./src
 
 Programmatic Usage:
-    from Asgard.Heimdall.Dependencies import DependencyAnalyzer, DependencyConfig
-    from Asgard.Heimdall.Dependencies import CycleDetector, ImportAnalyzer
+    from Heimdall.Dependencies import DependencyAnalyzer, DependencyConfig
+    from Heimdall.Dependencies import CycleDetector, ImportAnalyzer
 
     # Full dependency analysis
     config = DependencyConfig(scan_path="./src")
@@ -44,11 +44,19 @@ from Asgard.Heimdall.Dependencies.models.dependency_models import (
     ModularityMetrics,
     ModuleDependencies,
 )
+from Asgard.Heimdall.Dependencies.models.sbom_models import (
+    ComponentType,
+    SBOMComponent,
+    SBOMConfig,
+    SBOMDocument,
+    SBOMFormat,
+)
 from Asgard.Heimdall.Dependencies.services.import_analyzer import ImportAnalyzer
 from Asgard.Heimdall.Dependencies.services.graph_builder import GraphBuilder
 from Asgard.Heimdall.Dependencies.services.cycle_detector import CycleDetector
 from Asgard.Heimdall.Dependencies.services.modularity_analyzer import ModularityAnalyzer
 from Asgard.Heimdall.Dependencies.services.dependency_analyzer import DependencyAnalyzer
+from Asgard.Heimdall.Dependencies.services.sbom_generator import SBOMGenerator
 
 __all__ = [
     # Models
@@ -60,10 +68,17 @@ __all__ = [
     "DependencyType",
     "ModularityMetrics",
     "ModuleDependencies",
+    # SBOM models
+    "ComponentType",
+    "SBOMComponent",
+    "SBOMConfig",
+    "SBOMDocument",
+    "SBOMFormat",
     # Services
     "CycleDetector",
     "DependencyAnalyzer",
     "GraphBuilder",
     "ImportAnalyzer",
     "ModularityAnalyzer",
+    "SBOMGenerator",
 ]

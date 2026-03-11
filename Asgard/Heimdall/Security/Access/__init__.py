@@ -11,7 +11,7 @@ Usage:
     python -m Heimdall security access ./src
 
 Example:
-    from Asgard.Heimdall.Security.Access import AccessAnalyzer, AccessConfig
+    from Heimdall.Security.Access import AccessAnalyzer, AccessConfig
 
     analyzer = AccessAnalyzer(AccessConfig(scan_path="./src"))
     report = analyzer.analyze()

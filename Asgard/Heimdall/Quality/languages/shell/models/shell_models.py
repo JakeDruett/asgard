@@ -1,7 +1,8 @@
 """
 Heimdall Shell Script Analysis Models
 
-Pydantic models for shell script static analysis findings.
+Pydantic models for shell script static analysis findings reported by the
+regex-based ShellAnalyzer service.
 """
 
 from datetime import datetime
@@ -13,7 +14,7 @@ from pydantic import BaseModel, Field
 
 
 class ShellRuleCategory(str, Enum):
-    """Categories for shell script analysis rules."""
+    """Category of a shell script rule finding."""
     SECURITY = "security"
     BUG = "bug"
     STYLE = "style"
@@ -21,45 +22,45 @@ class ShellRuleCategory(str, Enum):
 
 
 class ShellSeverity(str, Enum):
-    """Severity levels for shell script findings."""
+    """Severity level for a shell script finding."""
     ERROR = "error"
     WARNING = "warning"
     INFO = "info"
 
 
 class ShellFinding(BaseModel):
-    """A single finding from shell script analysis."""
-    file_path: str = Field(..., description="Absolute path to the shell file containing the finding")
-    line_number: int = Field(..., description="Line number where the finding occurs")
-    rule_id: str = Field(..., description="Rule identifier, e.g. 'shell.eval-injection'")
+    """A single finding produced by the ShellAnalyzer."""
+    file_path: str = Field(..., description="Absolute path to the file containing the finding")
+    line_number: int = Field(..., description="1-based line number of the finding")
+    rule_id: str = Field(..., description="Unique rule identifier (e.g. 'shell.eval-injection')")
     category: ShellRuleCategory = Field(..., description="Rule category")
-    severity: ShellSeverity = Field(..., description="Severity level of the finding")
-    title: str = Field(..., description="Short title describing the finding")
-    description: str = Field(..., description="Detailed description of the finding")
-    code_snippet: str = Field("", description="The code snippet that triggered the finding")
-    fix_suggestion: str = Field("", description="Suggested fix for the finding")
+    severity: ShellSeverity = Field(..., description="Severity level")
+    title: str = Field(..., description="Short human-readable rule title")
+    description: str = Field(..., description="Detailed description of the issue")
+    code_snippet: str = Field("", description="The offending line of source code")
+    fix_suggestion: str = Field("", description="Suggested remediation")
 
     class Config:
         use_enum_values = True
 
 
 class ShellReport(BaseModel):
-    """Complete report from a shell script analysis run."""
+    """Complete analysis report produced by the ShellAnalyzer."""
     total_findings: int = Field(0, description="Total number of findings")
-    error_count: int = Field(0, description="Number of ERROR severity findings")
-    warning_count: int = Field(0, description="Number of WARNING severity findings")
-    info_count: int = Field(0, description="Number of INFO severity findings")
-    findings: List[ShellFinding] = Field(default_factory=list, description="All findings from the analysis")
+    error_count: int = Field(0, description="Number of ERROR-severity findings")
+    warning_count: int = Field(0, description="Number of WARNING-severity findings")
+    info_count: int = Field(0, description="Number of INFO-severity findings")
+    findings: List[ShellFinding] = Field(default_factory=list, description="All findings")
     files_analyzed: int = Field(0, description="Number of files analyzed")
     scan_path: str = Field("", description="Root path that was scanned")
-    scan_duration_seconds: float = Field(0.0, description="Time taken for the scan in seconds")
-    scanned_at: datetime = Field(default_factory=datetime.now, description="When the scan was performed")
+    scan_duration_seconds: float = Field(0.0, description="Duration of the scan in seconds")
+    scanned_at: datetime = Field(default_factory=datetime.now, description="Timestamp of the scan")
 
     class Config:
         use_enum_values = True
 
     def add_finding(self, finding: ShellFinding) -> None:
-        """Add a finding and update severity counts."""
+        """Append a finding and update summary counters."""
         self.findings.append(finding)
         self.total_findings += 1
         severity = finding.severity if isinstance(finding.severity, str) else finding.severity.value
@@ -67,61 +68,42 @@ class ShellReport(BaseModel):
             self.error_count += 1
         elif severity == ShellSeverity.WARNING.value:
             self.warning_count += 1
-        elif severity == ShellSeverity.INFO.value:
+        else:
             self.info_count += 1
 
     @property
     def has_findings(self) -> bool:
-        """Check if any findings were detected."""
+        """Return True when at least one finding exists."""
         return self.total_findings > 0
-
-    @property
-    def has_errors(self) -> bool:
-        """Check if any ERROR severity findings were detected."""
-        return self.error_count > 0
 
 
 class ShellAnalysisConfig(BaseModel):
-    """Configuration for shell script analysis."""
+    """Configuration for the ShellAnalyzer."""
     scan_path: Path = Field(default_factory=lambda: Path("."), description="Root path to scan")
     include_extensions: List[str] = Field(
         default_factory=lambda: [".sh", ".bash"],
-        description="File extensions to include in the scan"
+        description="File extensions to include",
     )
     also_check_shebangs: bool = Field(
         True,
-        description=(
-            "Also analyze files with no extension that start with a bash or sh shebang: "
-            "#!/bin/bash, #!/bin/sh, or #!/usr/bin/env bash"
-        )
+        description="Also include files with a shell shebang line regardless of extension",
     )
     exclude_patterns: List[str] = Field(
         default_factory=lambda: [
             "node_modules",
             ".git",
-            "build",
-            "dist",
-            "vendor",
             "__pycache__",
         ],
-        description="Path patterns to exclude from the scan"
+        description="Glob-style patterns to exclude",
     )
     enabled_rules: Optional[List[str]] = Field(
         None,
-        description="List of rule IDs to enable. None means all rules are enabled."
+        description="Explicit list of rule IDs to run (None means all rules)",
     )
     disabled_rules: List[str] = Field(
         default_factory=list,
-        description="List of rule IDs to disable"
+        description="Rule IDs to skip",
     )
 
     class Config:
         use_enum_values = True
-
-    def is_rule_enabled(self, rule_id: str) -> bool:
-        """Check whether a given rule should be applied."""
-        if rule_id in self.disabled_rules:
-            return False
-        if self.enabled_rules is not None:
-            return rule_id in self.enabled_rules
-        return True

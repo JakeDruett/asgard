@@ -11,7 +11,7 @@ Usage:
     python -m Heimdall security infrastructure ./src
 
 Example:
-    from Asgard.Heimdall.Security.Infrastructure import InfraAnalyzer, InfraConfig
+    from Heimdall.Security.Infrastructure import InfraAnalyzer, InfraConfig
 
     analyzer = InfraAnalyzer(InfraConfig(scan_path="./src"))
     report = analyzer.analyze()

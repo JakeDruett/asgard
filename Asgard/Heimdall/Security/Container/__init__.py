@@ -12,7 +12,7 @@ Usage:
     python -m Heimdall security container ./src
 
 Example:
-    from Asgard.Heimdall.Security.Container import ContainerAnalyzer, ContainerConfig
+    from Heimdall.Security.Container import ContainerAnalyzer, ContainerConfig
 
     analyzer = ContainerAnalyzer(ContainerConfig(scan_path="./src"))
     report = analyzer.analyze()

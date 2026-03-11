@@ -40,14 +40,15 @@ class DuplicationDetector:
     - Near-miss detection (Type 3 clones)
     """
 
-    # Python keywords and builtins preserved during normalization
-    PYTHON_KEYWORDS = {
-        'class', 'def', 'return', 'if', 'else', 'elif', 'for', 'while',
-        'import', 'from', 'as', 'try', 'except', 'finally', 'with',
-        'not', 'and', 'or', 'in', 'is', 'None', 'True', 'False',
-        'pass', 'break', 'continue', 'raise', 'yield', 'lambda', 'async', 'await',
-        'del', 'global', 'nonlocal', 'assert',
-    }
+    # Normalization patterns for token comparison
+    NORMALIZATION_PATTERNS = [
+        (r'\b[a-zA-Z_][a-zA-Z0-9_]*\b', 'IDENT'),  # Variable/function names
+        (r'\b\d+\.?\d*\b', 'NUM'),  # Numbers
+        (r'"[^"]*"', 'STR'),  # Double-quoted strings
+        (r"'[^']*'", 'STR'),  # Single-quoted strings
+        (r'#.*$', '', re.MULTILINE),  # Python comments
+        (r'//.*$', '', re.MULTILINE),  # C-style comments
+    ]
 
     def __init__(self, config: Optional[DuplicationConfig] = None):
         """
@@ -185,41 +186,7 @@ class DuplicationDetector:
             return self._extract_sliding_window_blocks(lines, file_path, relative_path)
 
         for node in ast.walk(tree):
-            if isinstance(node, ast.ClassDef):
-                start_line = node.lineno
-                end_line = node.end_lineno or start_line
-
-                if end_line - start_line + 1 >= self.config.min_block_size:
-                    block_lines = lines[start_line - 1:end_line]
-                    block_content = "\n".join(block_lines)
-
-                    # For classes, use method-name fingerprint instead of full
-                    # token content. Two classes are only duplicates if they
-                    # share the same set of method names, not just structure.
-                    method_names = sorted(
-                        n.name for n in ast.walk(node)
-                        if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
-                    )
-                    hash_value = self._hash_tokens(method_names)
-                    normalized = [node.name] + method_names
-
-                    blocks.append(CodeBlock(
-                        file_path=file_path,
-                        relative_path=relative_path,
-                        start_line=start_line,
-                        end_line=end_line,
-                        content=block_content,
-                        tokens=self._tokenize(block_content),
-                        normalized_tokens=normalized,
-                        hash_value=hash_value,
-                        line_count=end_line - start_line + 1,
-                    ))
-
-            elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                # Skip methods already nested inside a class
-                if self._is_nested_in_class(node, tree):
-                    continue
-
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
                 start_line = node.lineno
                 end_line = node.end_lineno or start_line
 
@@ -244,16 +211,6 @@ class DuplicationDetector:
                     ))
 
         return blocks
-
-    @staticmethod
-    def _is_nested_in_class(node: ast.AST, tree: ast.Module) -> bool:
-        """Check if a function node is defined inside a class body."""
-        for cls_node in ast.walk(tree):
-            if isinstance(cls_node, ast.ClassDef):
-                for child in ast.walk(cls_node):
-                    if child is node and child is not cls_node:
-                        return True
-        return False
 
     def _extract_sliding_window_blocks(
         self, lines: List[str], file_path: str, relative_path: str
@@ -299,26 +256,17 @@ class DuplicationDetector:
         return [t.strip() for t in tokens if t.strip()]
 
     def _normalize_tokens(self, tokens: List[str]) -> List[str]:
-        """Normalize tokens for structural comparison.
-
-        Preserves Python keywords and operators to maintain structural
-        distinction between different code blocks. Only normalizes
-        user-defined identifiers, numbers, and string literals.
-        """
+        """Normalize tokens for structural comparison."""
         normalized = []
-        for token in tokens:
-            if token in self.PYTHON_KEYWORDS:
-                normalized.append(token)
-            elif re.match(r'^[a-zA-Z_]\w*$', token):
-                normalized.append('IDENT')
-            elif re.match(r'^\d+\.?\d*$', token):
-                normalized.append('NUM')
-            elif re.match(r'^["\']', token):
-                normalized.append('STR')
-            elif token.startswith('#') or token.startswith('//'):
-                continue
-            else:
-                normalized.append(token)
+        token_string = " ".join(tokens)
+
+        # Apply normalization patterns
+        for pattern, replacement, *flags in self.NORMALIZATION_PATTERNS:
+            flag = flags[0] if flags else 0
+            token_string = re.sub(pattern, replacement, token_string, flags=flag)
+
+        # Re-tokenize after normalization
+        normalized = [t.strip() for t in token_string.split() if t.strip()]
         return normalized
 
     def _hash_tokens(self, tokens: List[str]) -> str:

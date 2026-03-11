@@ -24,12 +24,12 @@ Usage:
     python -m Heimdall quality naming ./src
 
 Programmatic Usage:
-    from Asgard.Heimdall.Quality import FileAnalyzer, AnalysisConfig
-    from Asgard.Heimdall.Quality import ComplexityAnalyzer, ComplexityConfig
-    from Asgard.Heimdall.Quality import DuplicationDetector, DuplicationConfig
-    from Asgard.Heimdall.Quality import CodeSmellDetector, SmellConfig
-    from Asgard.Heimdall.Quality import TechnicalDebtAnalyzer, DebtConfig
-    from Asgard.Heimdall.Quality import MaintainabilityAnalyzer, MaintainabilityConfig
+    from Heimdall.Quality import FileAnalyzer, AnalysisConfig
+    from Heimdall.Quality import ComplexityAnalyzer, ComplexityConfig
+    from Heimdall.Quality import DuplicationDetector, DuplicationConfig
+    from Heimdall.Quality import CodeSmellDetector, SmellConfig
+    from Heimdall.Quality import TechnicalDebtAnalyzer, DebtConfig
+    from Heimdall.Quality import MaintainabilityAnalyzer, MaintainabilityConfig
 
     # File length analysis
     config = AnalysisConfig(threshold=300)
@@ -180,6 +180,31 @@ from Asgard.Heimdall.Quality.models.naming_models import (
 )
 from Asgard.Heimdall.Quality.services.documentation_scanner import DocumentationScanner
 from Asgard.Heimdall.Quality.services.naming_convention_scanner import NamingConventionScanner
+from Asgard.Heimdall.Quality.BugDetection import (
+    BugCategory,
+    BugDetectionConfig,
+    BugDetector,
+    BugFinding,
+    BugReport,
+    BugSeverity,
+    NullDereferenceDetector,
+    UnreachableCodeDetector,
+)
+from Asgard.Heimdall.Quality.languages import (
+    JSAnalysisConfig,
+    JSAnalyzer,
+    JSFinding,
+    JSReport,
+    JSRuleCategory,
+    JSSeverity,
+    TSAnalyzer,
+    ShellAnalysisConfig,
+    ShellAnalyzer,
+    ShellFinding,
+    ShellReport,
+    ShellRuleCategory,
+    ShellSeverity,
+)
 
 __all__ = [
     # File length analysis
@@ -270,4 +295,28 @@ __all__ = [
     "NamingConventionScanner",
     "NamingReport",
     "NamingViolation",
+    # Bug detection
+    "BugCategory",
+    "BugDetectionConfig",
+    "BugDetector",
+    "BugFinding",
+    "BugReport",
+    "BugSeverity",
+    "NullDereferenceDetector",
+    "UnreachableCodeDetector",
+    # JavaScript/TypeScript analysis
+    "JSAnalysisConfig",
+    "JSAnalyzer",
+    "JSFinding",
+    "JSReport",
+    "JSRuleCategory",
+    "JSSeverity",
+    "TSAnalyzer",
+    # Shell analysis
+    "ShellAnalysisConfig",
+    "ShellAnalyzer",
+    "ShellFinding",
+    "ShellReport",
+    "ShellRuleCategory",
+    "ShellSeverity",
 ]

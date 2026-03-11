@@ -29,14 +29,14 @@ Usage:
     python -m Heimdall security infra ./src
 
 Example:
-    from Asgard.Heimdall.Security import StaticSecurityService
+    from Heimdall.Security import StaticSecurityService
 
     service = StaticSecurityService()
     report = service.scan("./src")
     print(f"Security Score: {report.security_score}/100")
 """
 
-__version__ = "1.2.0"
+__version__ = "1.1.0"
 __author__ = "Asgard Contributors"
 
 from Asgard.Heimdall.Security.models import (
@@ -141,15 +141,6 @@ from Asgard.Heimdall.Security.Compliance import (
     OWASPCategory,
     OWASPComplianceReport,
 )
-from Asgard.Heimdall.Security.TaintAnalysis import (
-    TaintAnalyzer,
-    TaintConfig,
-    TaintFlow,
-    TaintFlowStep,
-    TaintReport,
-    TaintSinkType,
-    TaintSourceType,
-)
 
 __all__ = [
     "CryptoFinding",
@@ -236,12 +227,4 @@ __all__ = [
     "CWEComplianceReport",
     "OWASPCategory",
     "OWASPComplianceReport",
-    # Taint analysis
-    "TaintAnalyzer",
-    "TaintConfig",
-    "TaintFlow",
-    "TaintFlowStep",
-    "TaintReport",
-    "TaintSinkType",
-    "TaintSourceType",
 ]

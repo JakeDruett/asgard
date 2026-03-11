@@ -81,7 +81,9 @@ class AccessConfig(BaseModel):
             "*Test",
             "tests",
             "test_*",
+            "Ankh_Test",
             "Asgard_Test",
+            "Hercules",
             # Exclude tool prototypes
             "_tool_prototypes",
             # Exclude package lock files

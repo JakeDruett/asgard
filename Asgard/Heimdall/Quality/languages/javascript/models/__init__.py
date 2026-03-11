@@ -1,6 +1,4 @@
-"""
-JavaScript analysis models package.
-"""
+"""JavaScript models package."""
 
 from Asgard.Heimdall.Quality.languages.javascript.models.js_models import (
     JSAnalysisConfig,

@@ -1,14 +1,11 @@
-"""
-TypeScript analysis models package.
-"""
+"""TypeScript models package (re-exports from js_models with TS-specific additions)."""
 
-from Asgard.Heimdall.Quality.languages.typescript.models.ts_models import (
+from Asgard.Heimdall.Quality.languages.javascript.models.js_models import (
     JSAnalysisConfig,
     JSFinding,
     JSReport,
     JSRuleCategory,
     JSSeverity,
-    TSAnalysisConfig,
 )
 
 __all__ = [
@@ -17,5 +14,4 @@ __all__ = [
     "JSReport",
     "JSRuleCategory",
     "JSSeverity",
-    "TSAnalysisConfig",
 ]

@@ -1,8 +1,4 @@
-"""
-Heimdall shell script analysis subpackage.
-
-Provides regex-based static analysis for bash and sh shell scripts.
-"""
+"""Shell script quality analysis subpackage."""
 
 from Asgard.Heimdall.Quality.languages.shell.models.shell_models import (
     ShellAnalysisConfig,

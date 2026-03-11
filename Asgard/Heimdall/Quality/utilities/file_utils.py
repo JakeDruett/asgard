@@ -5,236 +5,85 @@ Helper functions for file discovery, path filtering, and line counting.
 """
 
 import fnmatch
+import os
 from pathlib import Path
-from typing import Generator, List, Optional, Set
+from typing import Iterator, List, Optional, Set
 
-
-# Common code file extensions to analyze
 CODE_EXTENSIONS: Set[str] = {
-    # Python
-    ".py",
-    # JavaScript/TypeScript
-    ".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs",
-    # Web
-    ".html", ".css", ".scss", ".sass", ".less",
-    # Data/Config
-    ".json", ".yaml", ".yml", ".toml",
-    # Shell
-    ".sh", ".bash", ".zsh", ".ps1",
-    # Java/Kotlin
-    ".java", ".kt", ".kts",
-    # C/C++
-    ".c", ".h", ".cpp", ".hpp", ".cc",
-    # C#
-    ".cs",
-    # Go
-    ".go",
-    # Rust
-    ".rs",
-    # Ruby
-    ".rb",
-    # PHP
-    ".php",
-    # Swift
-    ".swift",
-    # SQL
-    ".sql",
-    # Lua
-    ".lua",
-    # R
-    ".r", ".R",
-    # Dart
-    ".dart",
-    # Vue/Svelte
-    ".vue", ".svelte",
+    ".py", ".js", ".jsx", ".ts", ".tsx", ".java", ".cs", ".go", ".rb",
+    ".php", ".scala", ".kt", ".swift", ".rs", ".c", ".cpp", ".h", ".hpp",
+    ".sh", ".bash", ".yaml", ".yml", ".json", ".toml", ".ini", ".cfg",
+    ".html", ".css", ".scss", ".sass", ".less", ".sql", ".tf", ".hcl",
 }
 
-# Directories to always exclude
 DEFAULT_EXCLUDE_DIRS: Set[str] = {
-    "__pycache__",
-    "node_modules",
-    ".git",
-    ".svn",
-    ".hg",
-    ".venv",
-    "venv",
-    "env",
-    ".env",
-    "build",
-    "dist",
-    ".next",
-    "out",
-    "coverage",
-    ".pytest_cache",
-    ".mypy_cache",
-    ".tox",
-    "eggs",
-    ".eggs",
-    "*.egg-info",
-    ".cache",
-    ".idea",
-    ".vscode",
-    "vendor",
-    "target",
-    "bin",
-    "obj",
-    ".gradle",
-    ".terraform",
+    "__pycache__", "node_modules", ".git", ".venv", "venv", "env",
+    ".env", "build", "dist", ".next", "coverage", ".tox", ".mypy_cache",
+    ".pytest_cache", ".ruff_cache", "htmlcov", "eggs", ".eggs",
+    "*.egg-info", "migrations",
 }
 
-# File patterns to always exclude
 DEFAULT_EXCLUDE_FILES: Set[str] = {
-    "*.min.js",
-    "*.min.css",
-    "*.map",
-    "*.lock",
-    "package-lock.json",
-    "yarn.lock",
-    "pnpm-lock.yaml",
-    "poetry.lock",
-    "Pipfile.lock",
-    "*.generated.*",
-    "*.auto.*",
-    "*.bundle.js",
-    "*.chunk.js",
+    "*.min.js", "*.min.css", "*.pyc", "*.pyo", "*.pyd",
+    "package-lock.json", "yarn.lock", "pnpm-lock.yaml",
+    "*.map", "*.snap",
 }
 
 
-def is_excluded_path(path: Path, exclude_patterns: List[str]) -> bool:
-    """
-    Check if a path should be excluded based on patterns.
-
-    Args:
-        path: The path to check
-        exclude_patterns: List of glob patterns to exclude
-
-    Returns:
-        True if the path should be excluded
-    """
-    path_str = str(path)
-    path_name = path.name
-
-    # Check if path starts with a dot (hidden files/dirs)
-    if path_name.startswith("."):
-        return True
-
-    # Check against exclude patterns
-    for pattern in exclude_patterns:
-        if fnmatch.fnmatch(path_name, pattern):
-            return True
-        if fnmatch.fnmatch(path_str, f"*/{pattern}/*"):
-            return True
-        if fnmatch.fnmatch(path_str, f"*/{pattern}"):
-            return True
-
-    # Check against default exclusions
-    if path.is_dir():
-        if path_name in DEFAULT_EXCLUDE_DIRS:
-            return True
-        for pattern in DEFAULT_EXCLUDE_DIRS:
-            if fnmatch.fnmatch(path_name, pattern):
-                return True
-    else:
-        for pattern in DEFAULT_EXCLUDE_FILES:
-            if fnmatch.fnmatch(path_name, pattern):
-                return True
-
-    return False
+def get_file_extension(file_path: str) -> str:
+    """Return the lowercase extension of a file path."""
+    return Path(file_path).suffix.lower()
 
 
-def get_file_extension(path: Path) -> str:
-    """
-    Get the file extension including the dot.
-
-    Args:
-        path: The file path
-
-    Returns:
-        The file extension (e.g., ".py")
-    """
-    return path.suffix.lower()
-
-
-def is_code_file(path: Path, include_extensions: Optional[List[str]] = None) -> bool:
-    """
-    Check if a file is a code file that should be analyzed.
-
-    Args:
-        path: The file path
-        include_extensions: Optional list of extensions to include (overrides defaults)
-
-    Returns:
-        True if the file should be analyzed
-    """
-    if not path.is_file():
-        return False
-
-    ext = get_file_extension(path)
-
-    if include_extensions:
-        # Normalize extensions to include dot
-        normalized = {e if e.startswith(".") else f".{e}" for e in include_extensions}
-        return ext in normalized
-
+def is_code_file(file_path: str, include_extensions: Optional[List[str]] = None) -> bool:
+    """Return True if the file is a recognised code file."""
+    ext = get_file_extension(file_path)
+    if include_extensions is not None:
+        return ext in {e.lower() for e in include_extensions}
     return ext in CODE_EXTENSIONS
 
 
-def count_lines(file_path: Path) -> int:
-    """
-    Count the number of lines in a file.
+def is_excluded_path(
+    file_path: str,
+    exclude_patterns: Optional[List[str]] = None,
+) -> bool:
+    """Return True if any component of the path matches an exclusion pattern."""
+    patterns = exclude_patterns if exclude_patterns is not None else list(DEFAULT_EXCLUDE_DIRS)
+    path = Path(file_path)
+    parts = list(path.parts) + [path.name]
+    for pattern in patterns:
+        for part in parts:
+            if fnmatch.fnmatch(part, pattern):
+                return True
+        if fnmatch.fnmatch(str(file_path), pattern):
+            return True
+    return False
 
-    Args:
-        file_path: Path to the file
 
-    Returns:
-        Number of lines in the file
-
-    Raises:
-        IOError: If the file cannot be read
-    """
+def count_lines(file_path: str) -> int:
+    """Count the total number of lines in a file."""
     try:
-        with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
-            return sum(1 for _ in f)
-    except (IOError, OSError) as e:
-        raise IOError(f"Failed to read file {file_path}: {e}")
+        with open(file_path, "r", encoding="utf-8", errors="replace") as fh:
+            return sum(1 for _ in fh)
+    except OSError:
+        return 0
 
 
 def scan_directory(
-    root_path: Path,
-    exclude_patterns: Optional[List[str]] = None,
+    root: str,
     include_extensions: Optional[List[str]] = None,
-) -> Generator[Path, None, None]:
-    """
-    Recursively scan a directory for code files.
-
-    Args:
-        root_path: The root directory to scan
-        exclude_patterns: Additional patterns to exclude
-        include_extensions: File extensions to include (None = use defaults)
-
-    Yields:
-        Paths to code files that should be analyzed
-    """
-    if exclude_patterns is None:
-        exclude_patterns = []
-
-    # Combine with default exclusions
-    all_exclusions = list(DEFAULT_EXCLUDE_DIRS) + exclude_patterns
-
-    def _scan_recursive(current_path: Path) -> Generator[Path, None, None]:
-        try:
-            for entry in current_path.iterdir():
-                # Skip excluded paths
-                if is_excluded_path(entry, all_exclusions):
-                    continue
-
-                if entry.is_dir():
-                    # Recurse into subdirectories
-                    yield from _scan_recursive(entry)
-                elif is_code_file(entry, include_extensions):
-                    yield entry
-        except PermissionError:
-            # Skip directories we don't have permission to read
-            pass
-
-    yield from _scan_recursive(root_path)
+    exclude_patterns: Optional[List[str]] = None,
+) -> Iterator[str]:
+    """Yield absolute paths of code files under root, respecting exclusions."""
+    for dirpath, dirnames, filenames in os.walk(root):
+        # Prune excluded directories in-place so os.walk skips them
+        dirnames[:] = [
+            d for d in dirnames
+            if not is_excluded_path(os.path.join(dirpath, d), exclude_patterns)
+        ]
+        for filename in filenames:
+            full_path = os.path.join(dirpath, filename)
+            if is_excluded_path(full_path, exclude_patterns):
+                continue
+            if is_code_file(full_path, include_extensions):
+                yield full_path

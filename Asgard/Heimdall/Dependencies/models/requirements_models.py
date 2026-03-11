@@ -38,7 +38,7 @@ class RequirementsConfig:
     exclude_patterns: List[str] = field(default_factory=lambda: [
         "__pycache__", ".git", ".venv", "venv", "node_modules",
         ".pytest_cache", ".mypy_cache", "dist", "build",
-        "*.egg-info",
+        "*.egg-info", "Hercules",  # Exclude test files by default
     ])
     include_extensions: List[str] = field(default_factory=lambda: [".py"])
     check_unused: bool = True

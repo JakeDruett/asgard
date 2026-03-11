@@ -19,7 +19,6 @@ import ast
 import fnmatch
 import json
 import os
-import re
 from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
@@ -38,33 +37,14 @@ from Asgard.Heimdall.Quality.models.env_fallback_models import (
 CREDENTIAL_KEY_FRAGMENTS = frozenset({
     "password", "passwd", "pwd", "secret", "token", "api_key", "apikey",
     "auth", "credential", "credentials", "private_key", "privatekey",
-    "access_key", "accesskey", "cert", "certificate",
+    "access_key", "accesskey",
 })
 
-# Safe/placeholder fallback values that are clearly not real credentials
-SAFE_FALLBACK_VALUES = frozenset({
-    "", "none", "null", "false", "true", "0", "1",
-    "changeme", "default", "localhost", "127.0.0.1",
-    "test", "testing", "debug", "dev", "development",
-    "example", "placeholder", "dummy", "sample",
-    "n/a", "na", "undefined", "not_set", "notset",
-    "your-key-here", "your_key_here", "replace_me",
-})
-
-# Value fragments that indicate a placeholder rather than a real credential
+# Value fragments that look like real credentials (not placeholders)
 CREDENTIAL_PLACEHOLDER_FRAGMENTS = frozenset({
     "${", "{{", "<", "changeme", "todo", "replace", "your-", "your_",
     "example", "placeholder", "xxxxx",
 })
-
-# Regex pattern for hex strings (32+ hex chars, typical of API keys and hashes)
-_HEX_PATTERN = re.compile(r"^[0-9a-fA-F]{32,}$")
-
-# Regex pattern for base64-like strings (24+ chars with base64 alphabet and padding)
-_BASE64_PATTERN = re.compile(r"^[A-Za-z0-9+/]{24,}={0,3}$")
-
-# Regex pattern for long alphanumeric strings that look like generated tokens/keys
-_ALPHANUM_TOKEN_PATTERN = re.compile(r"^[A-Za-z0-9_\-]{16,}$")
 
 
 def _is_credential_key_name(var_name: Optional[str]) -> bool:
@@ -95,43 +75,6 @@ def _is_credential_like_value(value_repr: Optional[str]) -> bool:
             return False
     # If it's a non-empty, non-placeholder string, it may be a real credential
     return True
-
-
-def _looks_like_hardcoded_credential(value_repr: Optional[str]) -> bool:
-    """
-    Return True if the fallback value looks like a real, hardcoded credential
-    rather than a safe placeholder.
-
-    Detects:
-    - Long alphanumeric strings (16+ characters) that look like generated tokens
-    - Base64-encoded strings (24+ characters)
-    - Hex strings (32+ characters, typical of API keys and hashes)
-    - Strings that are non-empty, non-placeholder, and not in the safe values list
-    """
-    if not value_repr:
-        return False
-    # Strip quotes added by repr()
-    value = value_repr.strip("'\"")
-    if not value:
-        return False
-    # Check against known safe values
-    if value.lower() in SAFE_FALLBACK_VALUES:
-        return False
-    # Check placeholder fragments
-    value_lower = value.lower()
-    for fragment in CREDENTIAL_PLACEHOLDER_FRAGMENTS:
-        if fragment in value_lower:
-            return False
-    # Check for hex strings (32+ hex chars)
-    if _HEX_PATTERN.match(value):
-        return True
-    # Check for base64-like strings (24+ chars)
-    if _BASE64_PATTERN.match(value):
-        return True
-    # Check for long alphanumeric token-like strings (16+ chars)
-    if _ALPHANUM_TOKEN_PATTERN.match(value):
-        return True
-    return False
 
 
 class EnvFallbackVisitor(ast.NodeVisitor):
@@ -250,39 +193,13 @@ class EnvFallbackVisitor(ast.NodeVisitor):
         else:
             context = "at module level"
 
-        # Determine context description and remediation based on fallback type
+        # Determine context description based on fallback type
         config_types = {
             EnvFallbackType.CONFIG_GET_DEFAULT,
             EnvFallbackType.SECRETS_GET_DEFAULT,
             EnvFallbackType.VAULT_OR_FALLBACK,
         }
-        credential_types = {
-            EnvFallbackType.CREDENTIAL_MISSING_NO_FALLBACK,
-            EnvFallbackType.HARDCODED_CREDENTIAL_VALUE,
-            EnvFallbackType.CREDENTIAL_KEY_GETENV_DEFAULT,
-            EnvFallbackType.CREDENTIAL_VALUE_ENVIRON_DEFAULT,
-        }
-
-        remediation = "Remove the default value. Environment variables should fail explicitly if not set."
-        if fallback_type == EnvFallbackType.CREDENTIAL_MISSING_NO_FALLBACK:
-            context_desc = f"Missing required security config {context}"
-            remediation = (
-                "Security-critical variable accessed without validation. "
-                "Ensure this variable is set in the environment and fail fast if missing."
-            )
-        elif fallback_type == EnvFallbackType.HARDCODED_CREDENTIAL_VALUE:
-            context_desc = f"Hardcoded credential value {context}"
-            remediation = (
-                "Fallback value looks like a real credential (long alphanumeric, base64, or hex string). "
-                "Remove the hardcoded value and source credentials from a secure store."
-            )
-        elif fallback_type in credential_types:
-            context_desc = f"Credential fallback {context}"
-            remediation = (
-                "Credential-like variable has a fallback value. "
-                "Remove the default and source credentials from a secure store."
-            )
-        elif fallback_type in config_types:
+        if fallback_type in config_types:
             context_desc = f"Config/secrets fallback {context}"
         else:
             context_desc = f"Environment variable fallback {context}"
@@ -299,20 +216,16 @@ class EnvFallbackVisitor(ast.NodeVisitor):
             containing_function=self.current_function,
             containing_class=self.current_class,
             context_description=context_desc,
-            remediation=remediation,
         ))
 
     def _determine_severity(self, fallback_type: EnvFallbackType) -> EnvFallbackSeverity:
         """Determine severity based on fallback type."""
-        critical_severity = {
-            EnvFallbackType.HARDCODED_CREDENTIAL_VALUE,
-            EnvFallbackType.CREDENTIAL_MISSING_NO_FALLBACK,
-        }
         high_severity = {
             EnvFallbackType.GETENV_DEFAULT,
             EnvFallbackType.ENVIRON_GET_DEFAULT,
             EnvFallbackType.CONFIG_GET_DEFAULT,
             EnvFallbackType.SECRETS_GET_DEFAULT,
+            # Credential-specific types are also high severity
             EnvFallbackType.CREDENTIAL_KEY_GETENV_DEFAULT,
             EnvFallbackType.CREDENTIAL_VALUE_ENVIRON_DEFAULT,
         }
@@ -322,9 +235,7 @@ class EnvFallbackVisitor(ast.NodeVisitor):
             EnvFallbackType.VAULT_OR_FALLBACK,
         }
 
-        if fallback_type in critical_severity:
-            return EnvFallbackSeverity.CRITICAL
-        elif fallback_type in high_severity:
+        if fallback_type in high_severity:
             return EnvFallbackSeverity.HIGH
         elif fallback_type in medium_severity:
             return EnvFallbackSeverity.MEDIUM
@@ -364,8 +275,8 @@ class EnvFallbackVisitor(ast.NodeVisitor):
         return False, None
 
     def visit_Call(self, node: ast.Call) -> None:
-        """Visit function calls to detect getenv/environ.get with defaults and credential issues."""
-        # Check for os.getenv
+        """Visit function calls to detect getenv/environ.get with defaults."""
+        # Check for os.getenv with default parameter
         if self._is_os_getenv(node):
             # Check for default argument (second positional or 'default' keyword)
             has_default = False
@@ -381,15 +292,11 @@ class EnvFallbackVisitor(ast.NodeVisitor):
                         default_value = self._get_default_value_repr(kw.value)
                         break
 
-            var_name = self._get_env_var_name(node)
-
             if has_default:
-                # Check if the fallback value looks like a hardcoded credential
-                if _looks_like_hardcoded_credential(default_value):
-                    fallback_type = EnvFallbackType.HARDCODED_CREDENTIAL_VALUE
+                var_name = self._get_env_var_name(node)
                 # Use credential-specific type when the key name is credential-like
                 # and the default value is non-empty and non-placeholder
-                elif (
+                if (
                     _is_credential_key_name(var_name)
                     and _is_credential_like_value(default_value)
                 ):
@@ -402,16 +309,8 @@ class EnvFallbackVisitor(ast.NodeVisitor):
                     var_name,
                     default_value,
                 )
-            elif _is_credential_key_name(var_name):
-                # Credential-named env var with no fallback -- flag as missing required security config
-                self._record_violation(
-                    node,
-                    EnvFallbackType.CREDENTIAL_MISSING_NO_FALLBACK,
-                    var_name,
-                    None,
-                )
 
-        # Check for os.environ.get
+        # Check for os.environ.get with default parameter
         elif self._is_os_environ_get(node):
             has_default = False
             default_value = None
@@ -426,15 +325,11 @@ class EnvFallbackVisitor(ast.NodeVisitor):
                         default_value = self._get_default_value_repr(kw.value)
                         break
 
-            var_name = self._get_env_var_name(node)
-
             if has_default:
-                # Check if the fallback value looks like a hardcoded credential
-                if _looks_like_hardcoded_credential(default_value):
-                    fallback_type = EnvFallbackType.HARDCODED_CREDENTIAL_VALUE
+                var_name = self._get_env_var_name(node)
                 # Use credential-specific type when the fallback value looks like
                 # a real credential (not a placeholder or empty string)
-                elif _is_credential_like_value(default_value):
+                if _is_credential_like_value(default_value):
                     fallback_type = EnvFallbackType.CREDENTIAL_VALUE_ENVIRON_DEFAULT
                 else:
                     fallback_type = EnvFallbackType.ENVIRON_GET_DEFAULT
@@ -443,14 +338,6 @@ class EnvFallbackVisitor(ast.NodeVisitor):
                     fallback_type,
                     var_name,
                     default_value,
-                )
-            elif _is_credential_key_name(var_name):
-                # Credential-named env var with no fallback -- flag as missing required security config
-                self._record_violation(
-                    node,
-                    EnvFallbackType.CREDENTIAL_MISSING_NO_FALLBACK,
-                    var_name,
-                    None,
                 )
 
         # Check for config/secrets dict .get() with default
@@ -730,7 +617,6 @@ class EnvFallbackScanner:
             EnvFallbackSeverity.LOW: 1,
             EnvFallbackSeverity.MEDIUM: 2,
             EnvFallbackSeverity.HIGH: 3,
-            EnvFallbackSeverity.CRITICAL: 4,
         }
         return levels.get(severity, 1)
 
@@ -779,7 +665,7 @@ class EnvFallbackScanner:
 
         if report.has_violations:
             lines.extend(["By Severity:"])
-            for severity in [EnvFallbackSeverity.CRITICAL, EnvFallbackSeverity.HIGH, EnvFallbackSeverity.MEDIUM, EnvFallbackSeverity.LOW]:
+            for severity in [EnvFallbackSeverity.HIGH, EnvFallbackSeverity.MEDIUM, EnvFallbackSeverity.LOW]:
                 count = report.violations_by_severity.get(severity.value, 0)
                 if count > 0:
                     lines.append(f"  {severity.value.upper()}: {count}")
@@ -800,7 +686,7 @@ class EnvFallbackScanner:
             lines.extend(["", "VIOLATIONS", "-" * 40])
 
             # Group by severity
-            for severity in [EnvFallbackSeverity.CRITICAL, EnvFallbackSeverity.HIGH, EnvFallbackSeverity.MEDIUM, EnvFallbackSeverity.LOW]:
+            for severity in [EnvFallbackSeverity.HIGH, EnvFallbackSeverity.MEDIUM, EnvFallbackSeverity.LOW]:
                 severity_violations = report.get_violations_by_severity(severity)
                 if severity_violations:
                     lines.extend(["", f"[{severity.value.upper()}]"])
@@ -884,7 +770,7 @@ class EnvFallbackScanner:
                 "| Severity | Count |",
                 "|----------|-------|",
             ])
-            for severity in [EnvFallbackSeverity.CRITICAL, EnvFallbackSeverity.HIGH, EnvFallbackSeverity.MEDIUM, EnvFallbackSeverity.LOW]:
+            for severity in [EnvFallbackSeverity.HIGH, EnvFallbackSeverity.MEDIUM, EnvFallbackSeverity.LOW]:
                 count = report.violations_by_severity.get(severity.value, 0)
                 lines.append(f"| {severity.value.title()} | {count} |")
 
@@ -909,7 +795,7 @@ class EnvFallbackScanner:
 
             lines.extend(["", "## Violations", ""])
 
-            for severity in [EnvFallbackSeverity.CRITICAL, EnvFallbackSeverity.HIGH, EnvFallbackSeverity.MEDIUM, EnvFallbackSeverity.LOW]:
+            for severity in [EnvFallbackSeverity.HIGH, EnvFallbackSeverity.MEDIUM, EnvFallbackSeverity.LOW]:
                 severity_violations = report.get_violations_by_severity(severity)
                 if severity_violations:
                     lines.extend([f"### {severity.value.title()} Severity", ""])

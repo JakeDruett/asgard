@@ -125,16 +125,14 @@ class GraphBuilder:
     def export_dot(
         self,
         scan_path: Optional[Path] = None,
-        output_path: Optional[Path] = None,
-        direction: str = "LR",
+        output_path: Optional[Path] = None
     ) -> str:
         """
-        Export the dependency graph in Graphviz DOT format.
+        Export the dependency graph in DOT format.
 
         Args:
             scan_path: Root path to scan
             output_path: Optional path to write DOT file
-            direction: Graph direction (LR, TB, RL, BT) maps to rankdir
 
         Returns:
             DOT format string
@@ -142,7 +140,7 @@ class GraphBuilder:
         graph = self.build_dict_graph(scan_path)
 
         lines = ["digraph dependencies {"]
-        lines.append(f"  rankdir={direction};")
+        lines.append("  rankdir=LR;")
         lines.append("  node [shape=box];")
         lines.append("")
 

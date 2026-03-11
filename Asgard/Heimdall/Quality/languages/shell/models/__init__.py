@@ -1,6 +1,4 @@
-"""
-Shell analysis models package.
-"""
+"""Shell analysis models package."""
 
 from Asgard.Heimdall.Quality.languages.shell.models.shell_models import (
     ShellAnalysisConfig,

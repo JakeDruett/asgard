@@ -175,7 +175,9 @@ class SecurityScanConfig(BaseModel):
             "*Test",
             "tests",
             "test_*",
+            "Ankh_Test",
             "Asgard_Test",
+            "Hercules",
             # Exclude tool prototypes (experimental code)
             "_tool_prototypes",
             # Exclude package lock files (contain dependency hashes that look like secrets)

@@ -1,9 +1,4 @@
-"""
-Heimdall TypeScript analysis subpackage.
-
-Provides regex-based static analysis for TypeScript and TSX files,
-extending the JavaScript analyzer with TypeScript-specific rules.
-"""
+"""TypeScript quality analysis subpackage."""
 
 from Asgard.Heimdall.Quality.languages.javascript.models.js_models import (
     JSAnalysisConfig,
@@ -12,7 +7,6 @@ from Asgard.Heimdall.Quality.languages.javascript.models.js_models import (
     JSRuleCategory,
     JSSeverity,
 )
-from Asgard.Heimdall.Quality.languages.typescript.models.ts_models import TSAnalysisConfig
 from Asgard.Heimdall.Quality.languages.typescript.services.ts_analyzer import TSAnalyzer
 
 __all__ = [
@@ -21,6 +15,5 @@ __all__ = [
     "JSReport",
     "JSRuleCategory",
     "JSSeverity",
-    "TSAnalysisConfig",
     "TSAnalyzer",
 ]

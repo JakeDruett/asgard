@@ -11,7 +11,7 @@ Usage:
     python -m Heimdall security auth ./src
 
 Example:
-    from Asgard.Heimdall.Security.Auth import AuthAnalyzer, AuthConfig
+    from Heimdall.Security.Auth import AuthAnalyzer, AuthConfig
 
     analyzer = AuthAnalyzer(AuthConfig(scan_path="./src"))
     report = analyzer.analyze()

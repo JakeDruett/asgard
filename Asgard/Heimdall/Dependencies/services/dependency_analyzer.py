@@ -4,7 +4,6 @@ Heimdall Dependency Analyzer Service
 Unified analyzer that combines all dependency analysis features.
 """
 
-import json
 import time
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -172,16 +171,13 @@ class DependencyAnalyzer:
         """
         return self.modularity_analyzer.analyze(scan_path)
 
-    def generate_report(
-        self, result: DependencyReport, format: str = "text", direction: str = "LR"
-    ) -> str:
+    def generate_report(self, result: DependencyReport, format: str = "text") -> str:
         """
         Generate a formatted report.
 
         Args:
             result: DependencyReport to format
-            format: Output format ("text", "json", "markdown", "mermaid", "graphviz")
-            direction: Graph direction for mermaid/graphviz formats (LR, TB, RL, BT)
+            format: Output format ("text", "json", "markdown")
 
         Returns:
             Formatted report string
@@ -190,172 +186,8 @@ class DependencyAnalyzer:
             return self._generate_json_report(result)
         elif format == "markdown":
             return self._generate_markdown_report(result)
-        elif format == "mermaid":
-            return self._generate_mermaid_report(result, direction)
-        elif format == "graphviz":
-            return self._generate_graphviz_report(result, direction)
         else:
             return self._generate_text_report(result)
-
-    def _collect_violation_sets(
-        self, result: DependencyReport
-    ) -> tuple:
-        """
-        Collect sets of violation nodes and edges for graph highlighting.
-
-        Returns:
-            Tuple of (cycle_nodes, high_coupling_nodes, cycle_edges) where:
-            - cycle_nodes: set of module names involved in any cycle
-            - high_coupling_nodes: set of module names with high coupling
-            - cycle_edges: set of (source, target) tuples that are part of cycles
-        """
-        cycle_nodes: set = set()
-        cycle_edges: set = set()
-        for cycle in result.circular_dependencies:
-            modules_in_cycle = cycle.cycle
-            for module in modules_in_cycle:
-                cycle_nodes.add(module)
-            for i in range(len(modules_in_cycle)):
-                src = modules_in_cycle[i]
-                tgt = modules_in_cycle[(i + 1) % len(modules_in_cycle)]
-                cycle_edges.add((src, tgt))
-
-        high_coupling_nodes: set = set()
-        for module in result.high_coupling_modules:
-            high_coupling_nodes.add(module.module_name)
-
-        return cycle_nodes, high_coupling_nodes, cycle_edges
-
-    def _generate_mermaid_report(self, result: DependencyReport, direction: str = "LR") -> str:
-        """
-        Generate Mermaid flowchart report with architectural violations highlighted.
-
-        Nodes involved in circular dependencies are styled with red fill.
-        High-coupling nodes are styled with orange fill.
-        Edges that are part of cycles are rendered as thick red arrows.
-
-        Args:
-            result: DependencyReport containing modules and violations
-            direction: Flowchart direction (LR, TB, RL, BT)
-
-        Returns:
-            Mermaid flowchart string
-        """
-        cycle_nodes, high_coupling_nodes, cycle_edges = self._collect_violation_sets(result)
-
-        lines = [f"flowchart {direction}"]
-
-        node_ids: dict = {}
-        for idx, module in enumerate(sorted(m.module_name for m in result.modules)):
-            node_id = f"n{idx}"
-            node_ids[module] = node_id
-            lines.append(f'  {node_id}["{module}"]')
-
-        lines.append("")
-
-        violation_link_indices: list = []
-        link_index = 0
-
-        for module in sorted(m.module_name for m in result.modules):
-            src_id = node_ids[module]
-            module_data = result.get_module(module)
-            if not module_data:
-                continue
-            for dep in sorted(module_data.all_dependencies):
-                if dep not in node_ids:
-                    continue
-                tgt_id = node_ids[dep]
-                if (module, dep) in cycle_edges:
-                    lines.append(f"  {src_id} ==> {tgt_id}")
-                    violation_link_indices.append(link_index)
-                else:
-                    lines.append(f"  {src_id} --> {tgt_id}")
-                link_index += 1
-
-        lines.append("")
-
-        if cycle_nodes:
-            for node_name in sorted(cycle_nodes):
-                if node_name in node_ids:
-                    nid = node_ids[node_name]
-                    lines.append(f"  style {nid} fill:#ff4444,color:#fff,stroke:#cc0000")
-
-        if high_coupling_nodes:
-            for node_name in sorted(high_coupling_nodes):
-                if node_name in node_ids and node_name not in cycle_nodes:
-                    nid = node_ids[node_name]
-                    lines.append(f"  style {nid} fill:#ff8c00,color:#fff,stroke:#cc6600")
-
-        if violation_link_indices:
-            lines.append(f"  linkStyle {','.join(str(i) for i in violation_link_indices)} stroke:#ff0000,stroke-width:3px")
-
-        lines.append("")
-        lines.append(f"%% Cycles: {result.total_cycles}  High-coupling: {len(result.high_coupling_modules)}")
-
-        return "\n".join(lines)
-
-    def _generate_graphviz_report(self, result: DependencyReport, direction: str = "LR") -> str:
-        """
-        Generate Graphviz DOT report with architectural violations highlighted.
-
-        Nodes involved in circular dependencies are filled red.
-        High-coupling nodes are filled orange.
-        Edges that are part of cycles are rendered in red with a bold penwidth.
-
-        Args:
-            result: DependencyReport containing modules and violations
-            direction: rankdir value (LR, TB, RL, BT)
-
-        Returns:
-            Graphviz DOT string
-        """
-        cycle_nodes, high_coupling_nodes, cycle_edges = self._collect_violation_sets(result)
-
-        lines = ["digraph dependencies {"]
-        lines.append(f"  rankdir={direction};")
-        lines.append("  node [shape=box, style=filled, fillcolor=lightblue];")
-        lines.append("")
-
-        for module in sorted(m.module_name for m in result.modules):
-            node_id = module.replace(".", "_")
-            if module in cycle_nodes:
-                lines.append(
-                    f'  "{node_id}" [label="{module}", fillcolor="#ff4444", fontcolor=white, '
-                    f'tooltip="VIOLATION: circular dependency"];'
-                )
-            elif module in high_coupling_nodes:
-                lines.append(
-                    f'  "{node_id}" [label="{module}", fillcolor="#ff8c00", fontcolor=white, '
-                    f'tooltip="WARNING: high coupling"];'
-                )
-            else:
-                lines.append(f'  "{node_id}" [label="{module}"];')
-
-        lines.append("")
-
-        for module in sorted(m.module_name for m in result.modules):
-            module_data = result.get_module(module)
-            if not module_data:
-                continue
-            src_id = module.replace(".", "_")
-            for dep in sorted(module_data.all_dependencies):
-                tgt_id = dep.replace(".", "_")
-                if (module, dep) in cycle_edges:
-                    lines.append(
-                        f'  "{src_id}" -> "{tgt_id}" [color=red, penwidth=2.0, '
-                        f'tooltip="VIOLATION: part of circular dependency"];'
-                    )
-                else:
-                    lines.append(f'  "{src_id}" -> "{tgt_id}";')
-
-        lines.append("")
-        lines.append(
-            f'  // Cycles: {result.total_cycles}  '
-            f'High-coupling: {len(result.high_coupling_modules)}'
-        )
-        lines.append("}")
-
-        return "\n".join(lines)
 
     def _generate_text_report(self, result: DependencyReport) -> str:
         """Generate text format report."""
@@ -434,6 +266,8 @@ class DependencyAnalyzer:
 
     def _generate_json_report(self, result: DependencyReport) -> str:
         """Generate JSON format report."""
+        import json
+
         output = {
             "scan_path": result.scan_path,
             "scanned_at": result.scanned_at.isoformat(),

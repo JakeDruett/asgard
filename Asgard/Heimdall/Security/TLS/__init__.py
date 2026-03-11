@@ -11,7 +11,7 @@ Usage:
     python -m Heimdall security tls ./src
 
 Example:
-    from Asgard.Heimdall.Security.TLS import TLSAnalyzer, TLSConfig
+    from Heimdall.Security.TLS import TLSAnalyzer, TLSConfig
 
     analyzer = TLSAnalyzer(TLSConfig(scan_path="./src"))
     report = analyzer.analyze()

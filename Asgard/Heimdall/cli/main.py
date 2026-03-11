@@ -52,6 +52,15 @@ from Asgard.Heimdall.cli.common import (
     add_profile_create_args,
     add_history_args,
     add_new_code_args,
+    add_taint_args,
+    add_bugs_args,
+    add_js_args,
+    add_ts_args,
+    add_shell_args,
+    add_issues_args,
+    add_sbom_args,
+    add_codefix_args,
+    add_mcp_server_args,
 )
 
 # Import handlers from the original CLI (will be refactored into separate modules)
@@ -97,6 +106,15 @@ from Asgard.Heimdall.cli.handlers import (
     run_profiles_command,
     run_history_command,
     run_new_code_detect,
+    run_taint_analysis,
+    run_bugs_analysis,
+    run_js_analysis,
+    run_ts_analysis,
+    run_shell_analysis,
+    run_issues_command,
+    run_sbom_generation,
+    run_codefix_suggestions,
+    run_mcp_server,
 )
 
 
@@ -200,6 +218,18 @@ def create_parser() -> argparse.ArgumentParser:
 
     # New-code command group
     _setup_new_code_commands(subparsers)
+
+    # Issues command (top-level)
+    _setup_issues_command(subparsers)
+
+    # SBOM command (top-level)
+    _setup_sbom_command(subparsers)
+
+    # Codefix command (top-level)
+    _setup_codefix_command(subparsers)
+
+    # MCP server command (top-level)
+    _setup_mcp_server_command(subparsers)
 
     return parser
 
@@ -447,6 +477,62 @@ def _setup_quality_commands(subparsers) -> None:
     )
     add_naming_args(quality_naming)
 
+    # Quality bugs
+    quality_bugs = quality_subparsers.add_parser(
+        "bugs",
+        help="Detect null dereferences, unreachable code, and other bugs",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "Examples:\n"
+            "  heimdall quality bugs ./src\n"
+            "  heimdall quality bugs ./src --null-only\n"
+            "  heimdall quality bugs ./src --unreachable-only --format json\n"
+        ),
+    )
+    add_bugs_args(quality_bugs)
+
+    # Quality javascript
+    quality_javascript = quality_subparsers.add_parser(
+        "javascript",
+        help="Analyze JavaScript files for quality issues",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "Examples:\n"
+            "  heimdall quality javascript ./src\n"
+            "  heimdall quality javascript ./src --severity high\n"
+            "  heimdall quality javascript ./src --format json\n"
+        ),
+    )
+    add_js_args(quality_javascript)
+
+    # Quality typescript
+    quality_typescript = quality_subparsers.add_parser(
+        "typescript",
+        help="Analyze TypeScript files for quality issues",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "Examples:\n"
+            "  heimdall quality typescript ./src\n"
+            "  heimdall quality typescript ./src --severity high\n"
+            "  heimdall quality typescript ./src --format json\n"
+        ),
+    )
+    add_ts_args(quality_typescript)
+
+    # Quality shell
+    quality_shell = quality_subparsers.add_parser(
+        "shell",
+        help="Analyze shell/bash scripts for quality and security issues",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "Examples:\n"
+            "  heimdall quality shell ./src\n"
+            "  heimdall quality shell ./scripts --severity high\n"
+            "  heimdall quality shell ./src --format json\n"
+        ),
+    )
+    add_shell_args(quality_shell)
+
 
 def _setup_security_commands(subparsers) -> None:
     """Set up security command group."""
@@ -522,6 +608,20 @@ def _setup_security_commands(subparsers) -> None:
         ),
     )
     add_compliance_args(security_compliance)
+
+    # Security taint
+    security_taint = security_subparsers.add_parser(
+        "taint",
+        help="Perform taint analysis to track untrusted data to dangerous sinks",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "Examples:\n"
+            "  heimdall security taint ./src\n"
+            "  heimdall security taint ./src --severity high\n"
+            "  heimdall security taint ./src --format json\n"
+        ),
+    )
+    add_taint_args(security_taint)
 
 
 def _setup_performance_commands(subparsers) -> None:
@@ -1038,6 +1138,72 @@ def _setup_new_code_commands(subparsers) -> None:
     add_new_code_args(new_code_detect)
 
 
+def _setup_issues_command(subparsers) -> None:
+    """Set up the issues top-level command."""
+    issues_parser = subparsers.add_parser(
+        "issues",
+        help="Manage tracked issues lifecycle (list, show, update, assign, summary)",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "Examples:\n"
+            "  heimdall issues list ./src\n"
+            "  heimdall issues show ./src --id abc-1234\n"
+            "  heimdall issues update ./src --id abc-1234 --status resolved\n"
+            "  heimdall issues assign ./src --id abc-1234 --assignee alice\n"
+            "  heimdall issues summary ./src\n"
+        ),
+    )
+    add_issues_args(issues_parser)
+
+
+def _setup_sbom_command(subparsers) -> None:
+    """Set up the sbom top-level command."""
+    sbom_parser = subparsers.add_parser(
+        "sbom",
+        help="Generate Software Bill of Materials (SBOM) in SPDX or CycloneDX format",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "Examples:\n"
+            "  heimdall sbom ./src\n"
+            "  heimdall sbom ./src --format spdx\n"
+            "  heimdall sbom ./src --format cyclonedx --output sbom.json\n"
+        ),
+    )
+    add_sbom_args(sbom_parser)
+
+
+def _setup_codefix_command(subparsers) -> None:
+    """Set up the codefix top-level command."""
+    codefix_parser = subparsers.add_parser(
+        "codefix",
+        help="Get fix suggestions for detected code issues",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "Examples:\n"
+            "  heimdall codefix ./src\n"
+            "  heimdall codefix ./src --rule ENV001\n"
+            "  heimdall codefix ./src --format json\n"
+        ),
+    )
+    add_codefix_args(codefix_parser)
+
+
+def _setup_mcp_server_command(subparsers) -> None:
+    """Set up the mcp-server top-level command."""
+    mcp_server_parser = subparsers.add_parser(
+        "mcp-server",
+        help="Start the Asgard MCP server for AI agent integration",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "Examples:\n"
+            "  heimdall mcp-server\n"
+            "  heimdall mcp-server --port 8080\n"
+            "  heimdall mcp-server --path /api/mcp\n"
+        ),
+    )
+    add_mcp_server_args(mcp_server_parser)
+
+
 COMMAND_DEFAULT_SUBCOMMANDS = {
     "security": "scan",
     "performance": "scan",
@@ -1050,7 +1216,7 @@ COMMAND_KNOWN_SUBCOMMANDS = {
     "security": {
         "scan", "secrets", "dependencies", "vulnerabilities", "crypto", "access",
         "auth", "headers", "tls", "container", "infra", "config-secrets",
-        "hotspots", "compliance",
+        "hotspots", "compliance", "taint",
     },
     "performance": {"scan", "memory", "cpu", "database", "cache"},
     "oop": {"analyze", "coupling", "cohesion", "inheritance"},
@@ -1113,6 +1279,10 @@ def main(args=None):
             print("  error-handling  Detect bare excepts, swallowed exceptions, and missing handlers")
             print("  documentation   Scan comment density and public API documentation coverage")
             print("  naming          Enforce PEP 8 naming conventions")
+            print("  bugs            Detect null dereferences, unreachable code, and other bugs")
+            print("  javascript      Analyze JavaScript files for quality issues")
+            print("  typescript      Analyze TypeScript files for quality issues")
+            print("  shell           Analyze shell/bash scripts for quality and security issues")
             print("\nUse 'heimdall quality <subcommand> -h' for help on a specific subcommand.")
             sys.exit(1)
 
@@ -1138,6 +1308,10 @@ def main(args=None):
             "error-handling": lambda: run_error_handling_analysis(args, verbose),
             "documentation": lambda: run_documentation_analysis(args, verbose),
             "naming": lambda: run_naming_analysis(args, verbose),
+            "bugs": lambda: run_bugs_analysis(args, verbose),
+            "javascript": lambda: run_js_analysis(args, verbose),
+            "typescript": lambda: run_ts_analysis(args, verbose),
+            "shell": lambda: run_shell_analysis(args, verbose),
         }
 
         if args.quality_command in handlers:
@@ -1168,6 +1342,7 @@ def main(args=None):
             print("  config-secrets  Detect secrets in config files using pattern and entropy analysis")
             print("  hotspots        Detect security-sensitive code patterns requiring manual review")
             print("  compliance      Generate OWASP Top 10 and CWE Top 25 compliance reports")
+            print("  taint           Perform taint analysis to track untrusted data to dangerous sinks")
             print("\nUse 'heimdall security <subcommand> -h' for help on a specific subcommand.")
             sys.exit(1)
 
@@ -1184,6 +1359,8 @@ def main(args=None):
             sys.exit(run_hotspots_analysis(args, verbose))
         elif args.security_command == "compliance":
             sys.exit(run_compliance_analysis(args, verbose))
+        elif args.security_command == "taint":
+            sys.exit(run_taint_analysis(args, verbose))
         elif args.security_command in security_types:
             sys.exit(run_security_analysis(args, verbose, security_types[args.security_command]))
         else:
@@ -1413,6 +1590,22 @@ def main(args=None):
             print("\nUse 'heimdall new-code <subcommand> -h' for help on a specific subcommand.")
             sys.exit(1)
         sys.exit(run_new_code_detect(args, verbose))
+
+    # Handle issues command
+    elif args.command == "issues":
+        sys.exit(run_issues_command(args, verbose))
+
+    # Handle sbom command
+    elif args.command == "sbom":
+        sys.exit(run_sbom_generation(args, verbose))
+
+    # Handle codefix command
+    elif args.command == "codefix":
+        sys.exit(run_codefix_suggestions(args, verbose))
+
+    # Handle mcp-server command
+    elif args.command == "mcp-server":
+        sys.exit(run_mcp_server(args, verbose))
 
     else:
         print(f"Unknown command: {args.command}")

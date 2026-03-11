@@ -236,6 +236,25 @@ from Asgard.Heimdall.common.new_code_period import (
 from Asgard.Reporting.History.services.history_store import HistoryStore
 from Asgard.Reporting.History.models.history_models import AnalysisSnapshot, MetricSnapshot
 
+import traceback as _traceback
+from Asgard.Heimdall.Security.TaintAnalysis.models.taint_models import TaintConfig
+from Asgard.Heimdall.Security.TaintAnalysis.services.taint_analyzer import TaintAnalyzer
+from Asgard.Heimdall.Quality.BugDetection.models.bug_models import BugDetectionConfig
+from Asgard.Heimdall.Quality.BugDetection.services.bug_detector import BugDetector
+from Asgard.Heimdall.Quality.languages.javascript.models.js_models import JSAnalysisConfig
+from Asgard.Heimdall.Quality.languages.javascript.services.js_analyzer import JSAnalyzer
+from Asgard.Heimdall.Quality.languages.typescript.services.ts_analyzer import TSAnalyzer
+from Asgard.Heimdall.Quality.languages.shell.models.shell_models import ShellAnalysisConfig
+from Asgard.Heimdall.Quality.languages.shell.services.shell_analyzer import ShellAnalyzer
+from Asgard.Heimdall.Issues.models.issue_models import IssueFilter, IssueStatus, IssueSeverity, IssueType, IssuesSummary, TrackedIssue
+from Asgard.Heimdall.Issues.services.issue_tracker import IssueTracker
+from Asgard.Heimdall.Dependencies.models.sbom_models import SBOMConfig, SBOMFormat
+from Asgard.Heimdall.Dependencies.services.sbom_generator import SBOMGenerator
+from Asgard.Heimdall.CodeFix.services.codefix_service import CodeFixService
+from Asgard.MCP.models.mcp_models import MCPServerConfig
+from Asgard.MCP.server.asgard_mcp_server import AsgardMCPServer
+
+
 _HTML_SEVERITY_COLORS = {
     "critical": "#c0392b",
     "severe": "#e67e22",
@@ -2969,3 +2988,843 @@ def run_new_code_detect(args: argparse.Namespace, verbose: bool = False) -> int:
 
     print("=" * 70)
     return 0
+
+def run_taint_analysis(args: argparse.Namespace, verbose: bool = False) -> int:
+    """Handle the 'heimdall security taint' subcommand."""
+    scan_path = Path(getattr(args, "path", ".")).resolve()
+    output_format = getattr(args, "format", "text")
+
+    if not scan_path.exists():
+        print(f"Error: Path does not exist: {scan_path}")
+        return 1
+
+    exclude_patterns = list(args.exclude) if args.exclude else []
+    severity_str = getattr(args, "severity", "low")
+
+    config = TaintConfig(
+        scan_path=scan_path,
+        min_severity=severity_str,
+        exclude_patterns=exclude_patterns if exclude_patterns else [
+            "__pycache__", "node_modules", ".git", ".venv", "venv", "build", "dist",
+        ],
+    )
+
+    try:
+        analyzer = TaintAnalyzer(config)
+        report = analyzer.scan()
+
+        if output_format == "json":
+            data = {
+                "scan_info": {
+                    "scan_path": report.scan_path,
+                    "scanned_at": report.scanned_at.isoformat(),
+                    "duration_seconds": report.scan_duration_seconds,
+                    "files_analyzed": report.files_analyzed,
+                },
+                "summary": {
+                    "total_flows": report.total_flows,
+                    "critical": report.critical_count,
+                    "high": report.high_count,
+                    "medium": report.medium_count,
+                },
+                "flows": [
+                    {
+                        "title": f.title,
+                        "severity": f.severity,
+                        "source_type": f.source_type,
+                        "sink_type": f.sink_type,
+                        "cwe_id": f.cwe_id,
+                        "owasp_category": f.owasp_category,
+                        "description": f.description,
+                        "source": {
+                            "file_path": f.source_location.file_path,
+                            "line_number": f.source_location.line_number,
+                            "function_name": f.source_location.function_name,
+                            "code_snippet": f.source_location.code_snippet,
+                        },
+                        "sink": {
+                            "file_path": f.sink_location.file_path,
+                            "line_number": f.sink_location.line_number,
+                            "function_name": f.sink_location.function_name,
+                            "code_snippet": f.sink_location.code_snippet,
+                        },
+                        "sanitizers_present": f.sanitizers_present,
+                    }
+                    for f in report.flows
+                ],
+            }
+            print(json.dumps(data, indent=2))
+        else:
+            lines = [
+                "",
+                "=" * 70,
+                "  HEIMDALL TAINT FLOW ANALYSIS",
+                "=" * 70,
+                "",
+                f"  Scan Path:      {report.scan_path}",
+                f"  Scanned At:     {report.scanned_at.strftime('%Y-%m-%d %H:%M:%S')}",
+                f"  Duration:       {report.scan_duration_seconds:.2f}s",
+                f"  Files Analyzed: {report.files_analyzed}",
+                "",
+                f"  Total Flows:    {report.total_flows}",
+                f"  [CRITICAL]:     {report.critical_count}",
+                f"  [HIGH]:         {report.high_count}",
+                f"  [MEDIUM]:       {report.medium_count}",
+                "",
+            ]
+            if report.flows:
+                lines.extend(["-" * 70, "  TAINT FLOWS", "-" * 70, ""])
+                for f in report.flows:
+                    severity_label = str(f.severity).upper()
+                    lines.append(f"  [{severity_label}] {f.title}")
+                    lines.append(
+                        f"  Source: {f.source_location.file_path}:{f.source_location.line_number}"
+                        f" ({f.source_type})"
+                    )
+                    lines.append(
+                        f"  Sink:   {f.sink_location.file_path}:{f.sink_location.line_number}"
+                        f" ({f.sink_type})"
+                    )
+                    if f.cwe_id:
+                        lines.append(f"  CWE: {f.cwe_id}  OWASP: {f.owasp_category or 'N/A'}")
+                    if f.sanitizers_present:
+                        lines.append("  Sanitizers detected (manual review recommended)")
+                    if verbose:
+                        lines.append(f"  Description: {f.description}")
+                    lines.append("")
+            else:
+                lines.extend(["  No taint flows detected.", ""])
+            lines.append("=" * 70)
+            print("\n".join(lines))
+
+        return 1 if report.critical_count > 0 or report.high_count > 0 else 0
+
+    except Exception as e:
+        print(f"Error: {e}")
+        if verbose:
+            import traceback
+            traceback.print_exc()
+        return 1
+
+
+
+def run_bugs_analysis(args: argparse.Namespace, verbose: bool = False) -> int:
+    """Handle the 'heimdall quality bugs' subcommand."""
+    scan_path = Path(getattr(args, "path", ".")).resolve()
+    output_format = getattr(args, "format", "text")
+
+    if not scan_path.exists():
+        print(f"Error: Path does not exist: {scan_path}")
+        return 1
+
+    null_only = getattr(args, "null_only", False)
+    unreachable_only = getattr(args, "unreachable_only", False)
+    exclude_patterns = list(args.exclude) if args.exclude else []
+
+    config = BugDetectionConfig(
+        scan_path=scan_path,
+        detect_null_dereference=not unreachable_only,
+        detect_unreachable_code=not null_only,
+        exclude_patterns=exclude_patterns if exclude_patterns else [
+            "__pycache__", "node_modules", ".git", ".venv", "venv", "build", "dist",
+        ],
+    )
+
+    try:
+        detector = BugDetector(config)
+        if null_only:
+            report = detector.scan_null_dereference_only()
+        elif unreachable_only:
+            report = detector.scan_unreachable_only()
+        else:
+            report = detector.scan()
+
+        if output_format == "json":
+            data = {
+                "scan_info": {
+                    "scan_path": report.scan_path,
+                    "scanned_at": report.scanned_at.isoformat(),
+                    "duration_seconds": report.scan_duration_seconds,
+                    "files_analyzed": report.files_analyzed,
+                },
+                "summary": {
+                    "total_bugs": report.total_bugs,
+                    "critical": report.critical_count,
+                    "high": report.high_count,
+                    "medium": report.medium_count,
+                    "low": report.low_count,
+                },
+                "findings": [
+                    {
+                        "file_path": f.file_path,
+                        "line_number": f.line_number,
+                        "category": f.category,
+                        "severity": f.severity,
+                        "title": f.title,
+                        "description": f.description,
+                        "code_snippet": f.code_snippet,
+                        "fix_suggestion": f.fix_suggestion,
+                    }
+                    for f in report.findings
+                ],
+            }
+            print(json.dumps(data, indent=2))
+        else:
+            lines = [
+                "",
+                "=" * 70,
+                "  HEIMDALL BUG DETECTION REPORT",
+                "=" * 70,
+                "",
+                f"  Scan Path:      {report.scan_path}",
+                f"  Scanned At:     {report.scanned_at.strftime('%Y-%m-%d %H:%M:%S')}",
+                f"  Duration:       {report.scan_duration_seconds:.2f}s",
+                f"  Files Analyzed: {report.files_analyzed}",
+                "",
+                f"  Total Bugs:     {report.total_bugs}",
+                f"  [CRITICAL]:     {report.critical_count}",
+                f"  [HIGH]:         {report.high_count}",
+                f"  [MEDIUM]:       {report.medium_count}",
+                f"  [LOW]:          {report.low_count}",
+                "",
+            ]
+            if report.findings:
+                lines.extend(["-" * 70, "  FINDINGS", "-" * 70, ""])
+                for f in report.findings:
+                    severity_label = str(f.severity).upper()
+                    lines.append(f"  [{severity_label}] {f.title}")
+                    lines.append(f"  File: {f.file_path}:{f.line_number}  Category: {f.category}")
+                    if f.code_snippet:
+                        lines.append(f"  Code: {f.code_snippet}")
+                    if verbose:
+                        lines.append(f"  Description: {f.description}")
+                        if f.fix_suggestion:
+                            lines.append(f"  Fix: {f.fix_suggestion}")
+                    lines.append("")
+            else:
+                lines.extend(["  No bugs detected.", ""])
+            lines.append("=" * 70)
+            print("\n".join(lines))
+
+        return 1 if report.critical_count > 0 or report.high_count > 0 else 0
+
+    except Exception as e:
+        print(f"Error: {e}")
+        if verbose:
+            import traceback
+            traceback.print_exc()
+        return 1
+
+
+# ---------------------------------------------------------------------------
+# JavaScript analysis handler
+# ---------------------------------------------------------------------------
+
+
+def run_js_analysis(args: argparse.Namespace, verbose: bool = False) -> int:
+    """Execute JavaScript static analysis and print findings."""
+    try:
+        scan_path = Path(args.path).resolve()
+        if not scan_path.exists():
+            print(f"Error: Path does not exist: {scan_path}")
+            return 1
+
+        exclude = list(args.exclude) if getattr(args, "exclude", None) else []
+        disabled = list(args.disabled_rules) if getattr(args, "disabled_rules", None) else []
+        max_file_lines = getattr(args, "max_file_lines", 500)
+        max_complexity = getattr(args, "max_complexity", 10)
+
+        config = JSAnalysisConfig(
+            scan_path=scan_path,
+            language="javascript",
+            include_extensions=[".js", ".jsx"],
+            exclude_patterns=[
+                "node_modules", ".git", "dist", "build", "__pycache__", "*.min.js"
+            ] + exclude,
+            disabled_rules=disabled,
+            max_file_lines=max_file_lines,
+            max_complexity=max_complexity,
+        )
+        analyzer = JSAnalyzer(config)
+        report = analyzer.analyze()
+
+        output_format = getattr(args, "format", "text")
+        if output_format == "json":
+            print(json.dumps(report.dict(), default=str, indent=2))
+            return 1 if report.error_count > 0 else 0
+
+        out_lines = [
+            "",
+            "=" * 70,
+            "  JAVASCRIPT ANALYSIS REPORT",
+            "=" * 70,
+            f"  Scan Path:       {report.scan_path}",
+            f"  Files Analyzed:  {report.files_analyzed}",
+            f"  Total Findings:  {report.total_findings}",
+            f"  Errors:          {report.error_count}",
+            f"  Warnings:        {report.warning_count}",
+            f"  Info:            {report.info_count}",
+            f"  Duration:        {report.scan_duration_seconds:.2f}s",
+            "",
+        ]
+        if report.findings:
+            out_lines.extend(["-" * 70, "  FINDINGS", "-" * 70, ""])
+            for finding in report.findings:
+                severity_label = str(finding.severity).upper()
+                out_lines.append(f"  [{severity_label}] {finding.rule_id}: {finding.title}")
+                out_lines.append(f"  File: {finding.file_path}:{finding.line_number}")
+                if finding.code_snippet:
+                    out_lines.append(f"  Code: {finding.code_snippet.strip()}")
+                if verbose:
+                    out_lines.append(f"  Description: {finding.description}")
+                    if finding.fix_suggestion:
+                        out_lines.append(f"  Fix: {finding.fix_suggestion}")
+                out_lines.append("")
+        else:
+            out_lines.extend(["  No findings detected.", ""])
+        out_lines.append("=" * 70)
+        print("\n".join(out_lines))
+        return 1 if report.error_count > 0 else 0
+
+    except Exception as exc:
+        print(f"Error: {exc}")
+        if verbose:
+            _traceback.print_exc()
+        return 1
+
+
+# ---------------------------------------------------------------------------
+# TypeScript analysis handler
+# ---------------------------------------------------------------------------
+
+
+def run_ts_analysis(args: argparse.Namespace, verbose: bool = False) -> int:
+    """Execute TypeScript static analysis and print findings."""
+    try:
+        scan_path = Path(args.path).resolve()
+        if not scan_path.exists():
+            print(f"Error: Path does not exist: {scan_path}")
+            return 1
+
+        exclude = list(args.exclude) if getattr(args, "exclude", None) else []
+        disabled = list(args.disabled_rules) if getattr(args, "disabled_rules", None) else []
+        max_file_lines = getattr(args, "max_file_lines", 500)
+        max_complexity = getattr(args, "max_complexity", 10)
+
+        config = JSAnalysisConfig(
+            scan_path=scan_path,
+            language="typescript",
+            include_extensions=[".ts", ".tsx"],
+            exclude_patterns=[
+                "node_modules", ".git", "dist", "build", "__pycache__"
+            ] + exclude,
+            disabled_rules=disabled,
+            max_file_lines=max_file_lines,
+            max_complexity=max_complexity,
+        )
+        analyzer = TSAnalyzer(config)
+        report = analyzer.analyze()
+
+        output_format = getattr(args, "format", "text")
+        if output_format == "json":
+            print(json.dumps(report.dict(), default=str, indent=2))
+            return 1 if report.error_count > 0 else 0
+
+        out_lines = [
+            "",
+            "=" * 70,
+            "  TYPESCRIPT ANALYSIS REPORT",
+            "=" * 70,
+            f"  Scan Path:       {report.scan_path}",
+            f"  Files Analyzed:  {report.files_analyzed}",
+            f"  Total Findings:  {report.total_findings}",
+            f"  Errors:          {report.error_count}",
+            f"  Warnings:        {report.warning_count}",
+            f"  Info:            {report.info_count}",
+            f"  Duration:        {report.scan_duration_seconds:.2f}s",
+            "",
+        ]
+        if report.findings:
+            out_lines.extend(["-" * 70, "  FINDINGS", "-" * 70, ""])
+            for finding in report.findings:
+                severity_label = str(finding.severity).upper()
+                out_lines.append(f"  [{severity_label}] {finding.rule_id}: {finding.title}")
+                out_lines.append(f"  File: {finding.file_path}:{finding.line_number}")
+                if finding.code_snippet:
+                    out_lines.append(f"  Code: {finding.code_snippet.strip()}")
+                if verbose:
+                    out_lines.append(f"  Description: {finding.description}")
+                    if finding.fix_suggestion:
+                        out_lines.append(f"  Fix: {finding.fix_suggestion}")
+                out_lines.append("")
+        else:
+            out_lines.extend(["  No findings detected.", ""])
+        out_lines.append("=" * 70)
+        print("\n".join(out_lines))
+        return 1 if report.error_count > 0 else 0
+
+    except Exception as exc:
+        print(f"Error: {exc}")
+        if verbose:
+            _traceback.print_exc()
+        return 1
+
+
+# ---------------------------------------------------------------------------
+# Shell analysis handler
+# ---------------------------------------------------------------------------
+
+
+def run_shell_analysis(args: argparse.Namespace, verbose: bool = False) -> int:
+    """Execute shell script static analysis and print findings."""
+    try:
+        scan_path = Path(args.path).resolve()
+        if not scan_path.exists():
+            print(f"Error: Path does not exist: {scan_path}")
+            return 1
+
+        exclude = list(args.exclude) if getattr(args, "exclude", None) else []
+        disabled = list(args.disabled_rules) if getattr(args, "disabled_rules", None) else []
+        also_check_shebangs = not getattr(args, "no_shebang_check", False)
+
+        config = ShellAnalysisConfig(
+            scan_path=scan_path,
+            exclude_patterns=["node_modules", ".git", "__pycache__"] + exclude,
+            also_check_shebangs=also_check_shebangs,
+            disabled_rules=disabled,
+        )
+        analyzer = ShellAnalyzer(config)
+        report = analyzer.analyze()
+
+        output_format = getattr(args, "format", "text")
+        if output_format == "json":
+            print(json.dumps(report.dict(), default=str, indent=2))
+            return 1 if report.error_count > 0 else 0
+
+        out_lines = [
+            "",
+            "=" * 70,
+            "  SHELL SCRIPT ANALYSIS REPORT",
+            "=" * 70,
+            f"  Scan Path:       {report.scan_path}",
+            f"  Files Analyzed:  {report.files_analyzed}",
+            f"  Total Findings:  {report.total_findings}",
+            f"  Errors:          {report.error_count}",
+            f"  Warnings:        {report.warning_count}",
+            f"  Info:            {report.info_count}",
+            f"  Duration:        {report.scan_duration_seconds:.2f}s",
+            "",
+        ]
+        if report.findings:
+            out_lines.extend(["-" * 70, "  FINDINGS", "-" * 70, ""])
+            for finding in report.findings:
+                severity_label = str(finding.severity).upper()
+                out_lines.append(f"  [{severity_label}] {finding.rule_id}: {finding.title}")
+                out_lines.append(f"  File: {finding.file_path}:{finding.line_number}")
+                if finding.code_snippet:
+                    out_lines.append(f"  Code: {finding.code_snippet.strip()}")
+                if verbose:
+                    out_lines.append(f"  Description: {finding.description}")
+                    if finding.fix_suggestion:
+                        out_lines.append(f"  Fix: {finding.fix_suggestion}")
+                out_lines.append("")
+        else:
+            out_lines.extend(["  No findings detected.", ""])
+        out_lines.append("=" * 70)
+        print("\n".join(out_lines))
+        return 1 if report.error_count > 0 else 0
+
+    except Exception as exc:
+        print(f"Error: {exc}")
+        if verbose:
+            _traceback.print_exc()
+        return 1
+
+
+# ---------------------------------------------------------------------------
+# Issues command handler
+# ---------------------------------------------------------------------------
+
+
+def run_issues_command(args: argparse.Namespace, verbose: bool = False) -> int:
+    """Route to the appropriate issues subcommand handler."""
+    subcommand = getattr(args, "issues_command", None)
+
+    if subcommand == "list":
+        return _run_issues_list(args, verbose)
+    if subcommand == "show":
+        return _run_issues_show(args, verbose)
+    if subcommand == "update":
+        return _run_issues_update(args, verbose)
+    if subcommand == "assign":
+        return _run_issues_assign(args, verbose)
+    if subcommand == "summary":
+        return _run_issues_summary(args, verbose)
+
+    print("Error: Please specify an issues subcommand (list, show, update, assign, summary).")
+    return 1
+
+
+
+def _run_issues_list(args: argparse.Namespace, verbose: bool) -> int:
+    """List issues for a project with optional filters."""
+    try:
+        project_path = str(Path(args.path).resolve())
+        tracker = IssueTracker()
+
+        status_vals = getattr(args, "status", None)
+        severity_vals = getattr(args, "severity", None)
+        rule_val = getattr(args, "rule", None)
+
+        issue_filter = None
+        if status_vals or severity_vals or rule_val:
+            issue_filter = IssueFilter(
+                status=[IssueStatus(s) for s in status_vals] if status_vals else None,
+                severity=[IssueSeverity(s) for s in severity_vals] if severity_vals else None,
+                rule_id=rule_val,
+            )
+
+        issues = tracker.get_issues(project_path, issue_filter)
+        output_format = getattr(args, "format", "text")
+
+        if output_format == "json":
+            print(json.dumps([i.dict() for i in issues], default=str, indent=2))
+            return 0
+
+        if not issues:
+            print(f"No issues found for project: {project_path}")
+            return 0
+
+        print(f"\nIssues for: {project_path}")
+        print("=" * 70)
+        for issue in issues:
+            print(
+                f"  [{str(issue.severity).upper()}] {issue.issue_id[:8]}  {issue.title}"
+            )
+            print(f"    Rule: {issue.rule_id}  Status: {issue.status}  File: {issue.file_path}:{issue.line_number}")
+            if verbose:
+                print(f"    First seen: {issue.first_detected}  Last seen: {issue.last_seen}")
+                if issue.assigned_to:
+                    print(f"    Assigned to: {issue.assigned_to}")
+            print()
+        print(f"Total: {len(issues)} issue(s)")
+        return 0
+
+    except Exception as exc:
+        print(f"Error: {exc}")
+        if verbose:
+            _traceback.print_exc()
+        return 1
+
+
+
+def _run_issues_show(args: argparse.Namespace, verbose: bool) -> int:
+    """Show details for a single issue by UUID."""
+    try:
+        issue_id = args.issue_id
+        tracker = IssueTracker()
+        issue = tracker.get_issue(issue_id)
+
+        if not issue:
+            print(f"Issue not found: {issue_id}")
+            return 1
+
+        output_format = getattr(args, "format", "text")
+        if output_format == "json":
+            print(json.dumps(issue.dict(), default=str, indent=2))
+            return 0
+
+        print(f"\nIssue: {issue.issue_id}")
+        print("=" * 70)
+        print(f"  Title:       {issue.title}")
+        print(f"  Rule:        {issue.rule_id}")
+        print(f"  Type:        {issue.issue_type}")
+        print(f"  Severity:    {issue.severity}")
+        print(f"  Status:      {issue.status}")
+        print(f"  File:        {issue.file_path}:{issue.line_number}")
+        print(f"  First seen:  {issue.first_detected}")
+        print(f"  Last seen:   {issue.last_seen}")
+        print(f"  Scan count:  {issue.scan_count}")
+        if issue.assigned_to:
+            print(f"  Assigned to: {issue.assigned_to}")
+        if issue.git_blame_author:
+            print(f"  Author:      {issue.git_blame_author}  ({issue.git_blame_commit})")
+        if issue.false_positive_reason:
+            print(f"  FP Reason:   {issue.false_positive_reason}")
+        print(f"\n  Description: {issue.description}")
+        if issue.comments:
+            print("\n  Comments:")
+            for comment in issue.comments:
+                print(f"    - {comment}")
+        if issue.tags:
+            print(f"\n  Tags: {', '.join(issue.tags)}")
+        print()
+        return 0
+
+    except Exception as exc:
+        print(f"Error: {exc}")
+        if verbose:
+            _traceback.print_exc()
+        return 1
+
+
+
+def _run_issues_update(args: argparse.Namespace, verbose: bool) -> int:
+    """Transition an issue to a new lifecycle status."""
+    try:
+        issue_id = args.issue_id
+        new_status = IssueStatus(args.status)
+        reason = getattr(args, "reason", None)
+
+        tracker = IssueTracker()
+        updated = tracker.update_status(issue_id, new_status, reason)
+
+        if not updated:
+            print(f"Issue not found: {issue_id}")
+            return 1
+
+        print(f"Issue {issue_id[:8]} status updated to: {updated.status}")
+        return 0
+
+    except Exception as exc:
+        print(f"Error: {exc}")
+        if verbose:
+            _traceback.print_exc()
+        return 1
+
+
+
+def _run_issues_assign(args: argparse.Namespace, verbose: bool) -> int:
+    """Assign an issue to a user."""
+    try:
+        issue_id = args.issue_id
+        assignee = args.assignee
+
+        tracker = IssueTracker()
+        updated = tracker.assign_issue(issue_id, assignee)
+
+        if not updated:
+            print(f"Issue not found: {issue_id}")
+            return 1
+
+        print(f"Issue {issue_id[:8]} assigned to: {updated.assigned_to}")
+        return 0
+
+    except Exception as exc:
+        print(f"Error: {exc}")
+        if verbose:
+            _traceback.print_exc()
+        return 1
+
+
+
+def _run_issues_summary(args: argparse.Namespace, verbose: bool) -> int:
+    """Display an aggregated issue summary for a project."""
+    try:
+        project_path = str(Path(args.path).resolve())
+        tracker = IssueTracker()
+        summary = tracker.get_summary(project_path)
+
+        output_format = getattr(args, "format", "text")
+        if output_format == "json":
+            print(json.dumps(summary.dict(), default=str, indent=2))
+            return 0
+
+        print(f"\nIssue Summary for: {project_path}")
+        print("=" * 70)
+        print(f"  Open:            {summary.total_open}")
+        print(f"  Confirmed:       {summary.total_confirmed}")
+        print(f"  Resolved:        {summary.total_resolved}")
+        print(f"  False Positives: {summary.total_false_positives}")
+        print(f"  Wont Fix:        {summary.total_wont_fix}")
+        if summary.open_by_severity:
+            print("\n  Open by Severity:")
+            for sev, count in sorted(summary.open_by_severity.items()):
+                print(f"    {sev:12s}: {count}")
+        if summary.open_by_type:
+            print("\n  Open by Type:")
+            for itype, count in sorted(summary.open_by_type.items()):
+                print(f"    {itype:20s}: {count}")
+        if summary.oldest_open_issue:
+            print(f"\n  Oldest open issue: {summary.oldest_open_issue}")
+        print()
+        return 0
+
+    except Exception as exc:
+        print(f"Error: {exc}")
+        if verbose:
+            _traceback.print_exc()
+        return 1
+
+
+
+def run_sbom_generation(args: argparse.Namespace, verbose: bool = False) -> int:
+    """Execute SBOM generation and output the result."""
+    import json as _json
+
+    from Asgard.Heimdall.Dependencies.models.sbom_models import SBOMConfig, SBOMFormat
+    from Asgard.Heimdall.Dependencies.services.sbom_generator import SBOMGenerator
+
+    scan_path = Path(args.path).resolve()
+
+    if not scan_path.exists():
+        print(f"Error: Path does not exist: {scan_path}")
+        return 1
+
+    try:
+        fmt_str = getattr(args, "format", "cyclonedx")
+        fmt = SBOMFormat.SPDX if fmt_str == "spdx" else SBOMFormat.CYCLONEDX
+
+        config = SBOMConfig(
+            scan_path=scan_path,
+            output_format=fmt,
+            project_name=getattr(args, "project_name", "") or "",
+            project_version=getattr(args, "project_version", "") or "",
+        )
+        generator = SBOMGenerator(config)
+        document = generator.generate(str(scan_path))
+
+        if fmt == SBOMFormat.SPDX:
+            output_dict = generator.to_spdx_json(document)
+        else:
+            output_dict = generator.to_cyclonedx_json(document)
+
+        output_json = _json.dumps(output_dict, indent=2, default=str)
+
+        output_file = getattr(args, "output", None)
+        if output_file:
+            with open(output_file, "w", encoding="utf-8") as fh:
+                fh.write(output_json)
+            print(f"SBOM written to: {output_file}")
+            print(f"Format:          {fmt_str.upper()}")
+            print(f"Components:      {document.total_components}")
+        else:
+            print(output_json)
+
+        return 0
+
+    except Exception as exc:
+        print(f"Error: {exc}")
+        if verbose:
+            _traceback.print_exc()
+        return 1
+
+
+
+def run_codefix_suggestions(args: argparse.Namespace, verbose: bool = False) -> int:
+    """Execute codefix suggestion generation and display the result."""
+    import json as _json
+
+    from Asgard.Heimdall.CodeFix.services.codefix_service import CodeFixService
+
+    scan_path = Path(args.path).resolve()
+    rule_id = getattr(args, "rule_id", None)
+    output_format = getattr(args, "format", "text")
+
+    if not scan_path.exists():
+        print(f"Error: Path does not exist: {scan_path}")
+        return 1
+
+    try:
+        service = CodeFixService()
+
+        if rule_id:
+            fix = service.get_fix(rule_id, code_snippet="")
+            if fix is None:
+                print(f"No fix template available for rule: {rule_id}")
+                return 0
+
+            if output_format == "json":
+                print(_json.dumps(fix.dict(), indent=2, default=str))
+            else:
+                print("")
+                print("=" * 70)
+                print(f"  CODE FIX: {fix.title}")
+                print("=" * 70)
+                print(f"  Rule:       {fix.rule_id}")
+                print(f"  Type:       {fix.fix_type}")
+                print(f"  Confidence: {fix.confidence}")
+                print("")
+                print(f"  Description:")
+                print(f"    {fix.description}")
+                if fix.explanation:
+                    print("")
+                    print(f"  Explanation:")
+                    print(f"    {fix.explanation}")
+                if fix.fixed_code:
+                    print("")
+                    print(f"  Suggested fix:")
+                    for line in fix.fixed_code.splitlines():
+                        print(f"    {line}")
+                if fix.references:
+                    print("")
+                    print(f"  References:")
+                    for ref in fix.references:
+                        print(f"    {ref}")
+                print("=" * 70)
+                print("")
+            return 0
+
+        # No specific rule — show the available rule fix catalogue
+        handlers = service._rule_handlers()
+        if output_format == "json":
+            catalogue = []
+            for rid in sorted(handlers.keys()):
+                fix = service.get_fix(rid)
+                if fix:
+                    catalogue.append({
+                        "rule_id": rid,
+                        "title": fix.title,
+                        "fix_type": fix.fix_type,
+                        "confidence": fix.confidence,
+                    })
+            print(_json.dumps(catalogue, indent=2, default=str))
+        else:
+            print("")
+            print("=" * 70)
+            print("  AVAILABLE CODE FIX TEMPLATES")
+            print("=" * 70)
+            print(f"  Scan path: {scan_path}")
+            print(f"  Use --rule RULE_ID to see fix details for a specific rule.")
+            print("")
+            for rid in sorted(handlers.keys()):
+                fix = service.get_fix(rid)
+                if fix:
+                    print(f"  {rid}")
+                    print(f"    -> {fix.title} [{fix.fix_type} / {fix.confidence}]")
+            print("=" * 70)
+            print("")
+        return 0
+
+    except Exception as exc:
+        print(f"Error: {exc}")
+        if verbose:
+            _traceback.print_exc()
+        return 1
+
+
+
+def run_mcp_server(args: argparse.Namespace, verbose: bool = False) -> int:
+    """Start the Asgard MCP server."""
+    from Asgard.MCP.models.mcp_models import MCPServerConfig
+    from Asgard.MCP.server.asgard_mcp_server import AsgardMCPServer
+
+    host = getattr(args, "host", "localhost")
+    port = int(getattr(args, "port", 8765))
+    project_path = getattr(args, "project_path", ".")
+
+    config = MCPServerConfig(
+        host=host,
+        port=port,
+        project_path=str(Path(project_path).resolve()),
+    )
+
+    try:
+        server = AsgardMCPServer(config)
+        server.run()
+        return 0
+    except Exception as exc:
+        print(f"Error starting MCP server: {exc}")
+        if verbose:
+            _traceback.print_exc()
+        return 1

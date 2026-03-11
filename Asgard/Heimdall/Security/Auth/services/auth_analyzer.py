@@ -159,8 +159,8 @@ class AuthAnalyzer:
         Args:
             report: Report to recalculate
         """
-        from Asgard.Heimdall.Security.models.security_models import SecuritySeverity
-        from Asgard.Heimdall.Security.Auth.models.auth_models import AuthFindingType
+        from Heimdall.Security.models.security_models import SecuritySeverity
+        from Heimdall.Security.Auth.models.auth_models import AuthFindingType
 
         report.total_issues = len(report.findings)
         report.critical_issues = sum(
@@ -206,7 +206,7 @@ class AuthAnalyzer:
 
     def _severity_order(self, severity: str) -> int:
         """Get sort order for severity (critical first)."""
-        from Asgard.Heimdall.Security.models.security_models import SecuritySeverity
+        from Heimdall.Security.models.security_models import SecuritySeverity
 
         order = {
             SecuritySeverity.CRITICAL.value: 0,

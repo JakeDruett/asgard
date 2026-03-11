@@ -1,14 +1,13 @@
 """
 Heimdall JavaScript Analyzer
 
-Regex and text-based static analysis for JavaScript and JSX files.
-Implements rules across bug detection, code smell, complexity, and style categories.
-Since JavaScript cannot be parsed with Python's ast module, all rules use
-regex pattern matching applied line-by-line or across the full file text.
+Performs regex-based static analysis on JavaScript and JSX source files.
+Because Python's ast module cannot parse JS/TS, all rules are implemented
+using line-by-line regular expression matching.
 """
 
+import fnmatch
 import re
-import time
 from datetime import datetime
 from pathlib import Path
 from typing import List, Optional
@@ -20,16 +19,6 @@ from Asgard.Heimdall.Quality.languages.javascript.models.js_models import (
     JSRuleCategory,
     JSSeverity,
 )
-
-
-_DEFAULT_EXTENSIONS = [".js", ".jsx"]
-_TEST_FILE_PATTERNS = ["test", "spec", "__tests__", ".test.", ".spec."]
-
-
-def _is_test_file(file_path: str) -> bool:
-    """Return True if the file path looks like a test file."""
-    lower = file_path.lower()
-    return any(pattern in lower for pattern in _TEST_FILE_PATTERNS)
 
 
 def _make_finding(
@@ -44,7 +33,7 @@ def _make_finding(
     fix_suggestion: str = "",
     column: int = 0,
 ) -> JSFinding:
-    """Helper to construct a JSFinding with consistent field population."""
+    """Construct a JSFinding with consistent defaults."""
     return JSFinding(
         file_path=file_path,
         line_number=line_number,
@@ -54,7 +43,7 @@ def _make_finding(
         severity=severity,
         title=title,
         description=description,
-        code_snippet=code_snippet.strip(),
+        code_snippet=code_snippet.rstrip(),
         fix_suggestion=fix_suggestion,
     )
 
@@ -63,537 +52,377 @@ class JSAnalyzer:
     """
     Regex-based static analyzer for JavaScript and JSX files.
 
-    Usage:
-        config = JSAnalysisConfig(scan_path=Path("./src"))
-        analyzer = JSAnalyzer(config)
-        report = analyzer.analyze(Path("./src"))
+    Each public rule method returns a list of JSFinding objects for a single
+    file.  The top-level analyze() method discovers files, runs all enabled
+    rules, and returns an aggregated JSReport.
     """
 
-    def __init__(self, config: Optional[JSAnalysisConfig] = None):
-        """
-        Initialise the JavaScript analyzer.
-
-        Args:
-            config: Analysis configuration. Defaults to JSAnalysisConfig() with default values.
-        """
+    def __init__(self, config: Optional[JSAnalysisConfig] = None) -> None:
         self._config = config or JSAnalysisConfig()
 
-    def analyze(self, scan_path: Optional[Path] = None) -> JSReport:
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
+
+    def analyze(self, scan_path: Optional[str] = None) -> JSReport:
         """
-        Scan a directory tree for JavaScript files and apply all enabled rules.
+        Analyze all matching source files under scan_path.
 
         Args:
-            scan_path: Root path to scan. Falls back to config.scan_path.
+            scan_path: Optional override for the config scan path.
 
         Returns:
             JSReport containing all findings.
         """
-        root = Path(scan_path) if scan_path else self._config.scan_path
-        root = root.resolve()
+        start = datetime.now()
+        root = Path(scan_path).resolve() if scan_path else self._config.scan_path.resolve()
+        report = JSReport(scan_path=str(root), language=self._config.language)
 
-        start_time = time.monotonic()
-        report = JSReport(
-            scan_path=str(root),
-            language="javascript",
-            scanned_at=datetime.now(),
-        )
-
-        extensions = self._config.include_extensions or _DEFAULT_EXTENSIONS
-        files = self._collect_files(root, extensions)
+        files = self._discover_files(root)
+        report.files_analyzed = len(files)
 
         for file_path in files:
-            findings = self._analyze_file(file_path)
-            for finding in findings:
+            try:
+                source_lines = Path(file_path).read_text(encoding="utf-8", errors="replace").splitlines()
+            except OSError:
+                continue
+
+            for finding in self._analyze_file(str(file_path), source_lines):
                 report.add_finding(finding)
 
-        report.files_analyzed = len(files)
-        report.scan_duration_seconds = time.monotonic() - start_time
+        report.scan_duration_seconds = (datetime.now() - start).total_seconds()
         return report
 
-    def _collect_files(self, root: Path, extensions: List[str]) -> List[Path]:
-        """Collect all files matching the given extensions, excluding configured patterns."""
-        collected: List[Path] = []
-        exclude = self._config.exclude_patterns
+    # ------------------------------------------------------------------
+    # File discovery
+    # ------------------------------------------------------------------
 
-        for ext in extensions:
-            for file_path in root.rglob(f"*{ext}"):
-                path_str = str(file_path)
-                if any(pattern in path_str for pattern in exclude):
-                    continue
-                collected.append(file_path)
+    def _discover_files(self, root: Path) -> List[Path]:
+        """Return all files matching the configured extensions, excluding patterns."""
+        results: List[Path] = []
+        for ext in self._config.include_extensions:
+            for candidate in root.rglob(f"*{ext}"):
+                if not self._is_excluded(candidate):
+                    results.append(candidate)
+        return sorted(set(results))
 
-        return sorted(collected)
+    def _is_excluded(self, path: Path) -> bool:
+        """Return True if the path matches any exclusion pattern."""
+        parts = path.parts
+        for pattern in self._config.exclude_patterns:
+            for part in parts:
+                if fnmatch.fnmatch(part, pattern):
+                    return True
+        return False
 
-    def _analyze_file(self, file_path: Path) -> List[JSFinding]:
-        """Run all enabled rules against a single file."""
-        try:
-            content = file_path.read_text(encoding="utf-8", errors="replace")
-        except OSError:
-            return []
+    def _is_rule_enabled(self, rule_id: str) -> bool:
+        """Return True when the rule should be executed."""
+        if rule_id in self._config.disabled_rules:
+            return False
+        if self._config.enabled_rules is not None:
+            return rule_id in self._config.enabled_rules
+        return True
 
-        lines = content.splitlines()
-        path_str = str(file_path)
+    # ------------------------------------------------------------------
+    # Per-file analysis dispatch
+    # ------------------------------------------------------------------
+
+    def _analyze_file(self, file_path: str, lines: List[str]) -> List[JSFinding]:
+        """Run all enabled rules against a single file's source lines."""
         findings: List[JSFinding] = []
-
-        findings.extend(self._rule_no_undef_comparison(path_str, lines))
-        findings.extend(self._rule_use_strict_equality(path_str, lines))
-        findings.extend(self._rule_no_eval(path_str, lines))
-        findings.extend(self._rule_no_implied_eval(path_str, lines))
-        if not _is_test_file(path_str):
-            findings.extend(self._rule_no_console(path_str, lines))
-        findings.extend(self._rule_no_debugger(path_str, lines))
-        findings.extend(self._rule_no_alert(path_str, lines))
-        findings.extend(self._rule_var_declaration(path_str, lines))
-        findings.extend(self._rule_no_empty_function(path_str, lines))
-        findings.extend(self._rule_prefer_const(path_str, lines))
-        findings.extend(self._rule_max_lines_per_function(path_str, lines))
-        findings.extend(self._rule_max_file_lines(path_str, lines))
-        findings.extend(self._rule_no_unused_vars(path_str, lines))
-        findings.extend(self._rule_complexity(path_str, lines))
-        findings.extend(self._rule_semi(path_str, lines))
-        findings.extend(self._rule_eol_last(path_str, content))
-
+        findings.extend(self._check_no_eval(file_path, lines))
+        findings.extend(self._check_no_implied_eval(file_path, lines))
+        findings.extend(self._check_no_debugger(file_path, lines))
+        findings.extend(self._check_eqeqeq(file_path, lines))
+        findings.extend(self._check_no_alert(file_path, lines))
+        findings.extend(self._check_no_var(file_path, lines))
+        findings.extend(self._check_no_empty_block(file_path, lines))
+        findings.extend(self._check_no_console(file_path, lines))
+        findings.extend(self._check_max_file_lines(file_path, lines))
+        findings.extend(self._check_complexity(file_path, lines))
+        findings.extend(self._check_no_trailing_spaces(file_path, lines))
+        findings.extend(self._check_max_line_length(file_path, lines))
         return findings
 
-    # --- Bug Detection Rules ---
+    # ------------------------------------------------------------------
+    # Bug / Security rules
+    # ------------------------------------------------------------------
 
-    def _rule_no_undef_comparison(self, file_path: str, lines: List[str]) -> List[JSFinding]:
-        """js.no-undef-comparison: Comparing with undefined using == instead of ===."""
-        if not self._config.is_rule_enabled("js.no-undef-comparison"):
+    def _check_no_eval(self, file_path: str, lines: List[str]) -> List[JSFinding]:
+        """js.no-eval: direct use of eval()."""
+        if not self._is_rule_enabled("js.no-eval"):
             return []
-        findings = []
-        pattern = re.compile(r'(?:==\s*undefined|undefined\s*==)[^=]')
-        for i, line in enumerate(lines, start=1):
+        findings: List[JSFinding] = []
+        pattern = re.compile(r"\beval\s*\(")
+        for idx, line in enumerate(lines, start=1):
             if pattern.search(line):
                 findings.append(_make_finding(
                     file_path=file_path,
-                    line_number=i,
-                    rule_id="js.no-undef-comparison",
-                    category=JSRuleCategory.BUG,
-                    severity=JSSeverity.WARNING,
-                    title="Loose undefined comparison",
-                    description="Use === instead of == when comparing with undefined to avoid unexpected type coercion.",
-                    code_snippet=line,
-                    fix_suggestion="Replace == undefined with === undefined (or use typeof check).",
-                ))
-        return findings
-
-    def _rule_use_strict_equality(self, file_path: str, lines: List[str]) -> List[JSFinding]:
-        """js.use-strict-equality: Using == or != instead of === or !==."""
-        if not self._config.is_rule_enabled("js.use-strict-equality"):
-            return []
-        findings = []
-        # Match == or != but not === or !==, and not <= >= ==
-        pattern = re.compile(r'(?<![=!<>])(?:==|!=)(?!=)')
-        for i, line in enumerate(lines, start=1):
-            stripped = line.strip()
-            if stripped.startswith("//") or stripped.startswith("*"):
-                continue
-            if pattern.search(line):
-                findings.append(_make_finding(
-                    file_path=file_path,
-                    line_number=i,
-                    rule_id="js.use-strict-equality",
-                    category=JSRuleCategory.BUG,
-                    severity=JSSeverity.WARNING,
-                    title="Loose equality operator",
-                    description="Use === and !== instead of == and != to avoid unexpected type coercion.",
-                    code_snippet=line,
-                    fix_suggestion="Replace == with === and != with !==.",
-                ))
-        return findings
-
-    def _rule_no_eval(self, file_path: str, lines: List[str]) -> List[JSFinding]:
-        """js.no-eval: Use of eval() is a security risk."""
-        if not self._config.is_rule_enabled("js.no-eval"):
-            return []
-        findings = []
-        pattern = re.compile(r'\beval\s*\(')
-        for i, line in enumerate(lines, start=1):
-            stripped = line.strip()
-            if stripped.startswith("//") or stripped.startswith("*"):
-                continue
-            if pattern.search(line):
-                findings.append(_make_finding(
-                    file_path=file_path,
-                    line_number=i,
+                    line_number=idx,
                     rule_id="js.no-eval",
                     category=JSRuleCategory.SECURITY,
                     severity=JSSeverity.ERROR,
                     title="Use of eval()",
-                    description="eval() is a security risk and should never be used. It executes arbitrary code.",
+                    description="eval() executes arbitrary code and is a security risk.",
                     code_snippet=line,
-                    fix_suggestion="Refactor to avoid eval(). Use JSON.parse() for JSON, or restructure logic.",
+                    fix_suggestion="Remove eval() and use a safer alternative such as JSON.parse() or Function.",
                 ))
         return findings
 
-    def _rule_no_implied_eval(self, file_path: str, lines: List[str]) -> List[JSFinding]:
-        """js.no-implied-eval: setTimeout/setInterval with string literal as first argument."""
-        if not self._config.is_rule_enabled("js.no-implied-eval"):
+    def _check_no_implied_eval(self, file_path: str, lines: List[str]) -> List[JSFinding]:
+        """js.no-implied-eval: setTimeout/setInterval with string literal."""
+        if not self._is_rule_enabled("js.no-implied-eval"):
             return []
-        findings = []
-        pattern = re.compile(r'(?:setTimeout|setInterval)\s*\(\s*["\']')
-        for i, line in enumerate(lines, start=1):
-            stripped = line.strip()
-            if stripped.startswith("//") or stripped.startswith("*"):
-                continue
+        findings: List[JSFinding] = []
+        pattern = re.compile(r"(setTimeout|setInterval)\s*\(\s*['\"]")
+        for idx, line in enumerate(lines, start=1):
             if pattern.search(line):
                 findings.append(_make_finding(
                     file_path=file_path,
-                    line_number=i,
+                    line_number=idx,
                     rule_id="js.no-implied-eval",
                     category=JSRuleCategory.SECURITY,
                     severity=JSSeverity.WARNING,
-                    title="Implied eval via setTimeout/setInterval",
-                    description=(
-                        "Passing a string to setTimeout or setInterval causes an implied eval, "
-                        "which is a security risk."
-                    ),
+                    title="Implied eval via setTimeout/setInterval with string",
+                    description="Passing a string to setTimeout or setInterval evaluates code like eval().",
                     code_snippet=line,
-                    fix_suggestion="Pass a function reference instead of a string literal.",
+                    fix_suggestion="Pass a function reference instead of a string.",
                 ))
         return findings
 
-    def _rule_no_console(self, file_path: str, lines: List[str]) -> List[JSFinding]:
-        """js.no-console: console.log/warn/error calls in non-test files."""
-        if not self._config.is_rule_enabled("js.no-console"):
+    def _check_no_debugger(self, file_path: str, lines: List[str]) -> List[JSFinding]:
+        """js.no-debugger: debugger; statement."""
+        if not self._is_rule_enabled("js.no-debugger"):
             return []
-        findings = []
-        pattern = re.compile(r'\bconsole\.(log|warn|error|debug|info)\s*\(')
-        for i, line in enumerate(lines, start=1):
-            stripped = line.strip()
-            if stripped.startswith("//") or stripped.startswith("*"):
-                continue
+        findings: List[JSFinding] = []
+        pattern = re.compile(r"\bdebugger\s*;")
+        for idx, line in enumerate(lines, start=1):
             if pattern.search(line):
                 findings.append(_make_finding(
                     file_path=file_path,
-                    line_number=i,
-                    rule_id="js.no-console",
-                    category=JSRuleCategory.CODE_SMELL,
-                    severity=JSSeverity.INFO,
-                    title="console statement",
-                    description="console statements should not be present in production code.",
-                    code_snippet=line,
-                    fix_suggestion="Remove console statement or replace with a proper logging library.",
-                ))
-        return findings
-
-    def _rule_no_debugger(self, file_path: str, lines: List[str]) -> List[JSFinding]:
-        """js.no-debugger: debugger; statement in code."""
-        if not self._config.is_rule_enabled("js.no-debugger"):
-            return []
-        findings = []
-        pattern = re.compile(r'\bdebugger\s*;')
-        for i, line in enumerate(lines, start=1):
-            if pattern.search(line):
-                findings.append(_make_finding(
-                    file_path=file_path,
-                    line_number=i,
+                    line_number=idx,
                     rule_id="js.no-debugger",
                     category=JSRuleCategory.BUG,
-                    severity=JSSeverity.ERROR,
-                    title="debugger statement",
-                    description="debugger statements must be removed before committing code.",
+                    severity=JSSeverity.WARNING,
+                    title="Debugger statement found",
+                    description="debugger statements should be removed before committing code.",
                     code_snippet=line,
                     fix_suggestion="Remove the debugger statement.",
                 ))
         return findings
 
-    def _rule_no_alert(self, file_path: str, lines: List[str]) -> List[JSFinding]:
-        """js.no-alert: alert() or window.alert() calls."""
-        if not self._config.is_rule_enabled("js.no-alert"):
+    def _check_eqeqeq(self, file_path: str, lines: List[str]) -> List[JSFinding]:
+        """js.eqeqeq: use of == or != instead of === or !==."""
+        if not self._is_rule_enabled("js.eqeqeq"):
             return []
-        findings = []
-        pattern = re.compile(r'(?:\bwindow\.)?\balert\s*\(')
-        for i, line in enumerate(lines, start=1):
-            stripped = line.strip()
-            if stripped.startswith("//") or stripped.startswith("*"):
-                continue
+        findings: List[JSFinding] = []
+        eq_pattern = re.compile(r"[^=!<>]==[^=]")
+        neq_pattern = re.compile(r"[^!]!=[^=]")
+        for idx, line in enumerate(lines, start=1):
+            if eq_pattern.search(line) or neq_pattern.search(line):
+                findings.append(_make_finding(
+                    file_path=file_path,
+                    line_number=idx,
+                    rule_id="js.eqeqeq",
+                    category=JSRuleCategory.BUG,
+                    severity=JSSeverity.WARNING,
+                    title="Use === and !== instead of == and !=",
+                    description="Loose equality operators perform type coercion and can produce unexpected results.",
+                    code_snippet=line,
+                    fix_suggestion="Replace == with === and != with !==.",
+                ))
+        return findings
+
+    def _check_no_alert(self, file_path: str, lines: List[str]) -> List[JSFinding]:
+        """js.no-alert: use of alert()."""
+        if not self._is_rule_enabled("js.no-alert"):
+            return []
+        findings: List[JSFinding] = []
+        pattern = re.compile(r"\balert\s*\(")
+        for idx, line in enumerate(lines, start=1):
             if pattern.search(line):
                 findings.append(_make_finding(
                     file_path=file_path,
-                    line_number=i,
+                    line_number=idx,
                     rule_id="js.no-alert",
                     category=JSRuleCategory.CODE_SMELL,
                     severity=JSSeverity.WARNING,
-                    title="alert() usage",
-                    description="alert() is disruptive UI and should not be used in production code.",
+                    title="Use of alert()",
+                    description="alert() is a UI blocking call that should not be used in production code.",
                     code_snippet=line,
-                    fix_suggestion="Replace alert() with a proper notification component or modal.",
+                    fix_suggestion="Remove alert() and use a proper notification mechanism.",
                 ))
         return findings
 
-    # --- Code Smell Rules ---
+    # ------------------------------------------------------------------
+    # Code smell rules
+    # ------------------------------------------------------------------
 
-    def _rule_var_declaration(self, file_path: str, lines: List[str]) -> List[JSFinding]:
-        """js.var-declaration: Use of var instead of let/const."""
-        if not self._config.is_rule_enabled("js.var-declaration"):
+    def _check_no_var(self, file_path: str, lines: List[str]) -> List[JSFinding]:
+        """js.no-var: use of var instead of let/const."""
+        if not self._is_rule_enabled("js.no-var"):
             return []
-        findings = []
-        pattern = re.compile(r'\bvar\s+')
-        for i, line in enumerate(lines, start=1):
-            stripped = line.strip()
-            if stripped.startswith("//") or stripped.startswith("*"):
-                continue
+        findings: List[JSFinding] = []
+        pattern = re.compile(r"\bvar\s+")
+        for idx, line in enumerate(lines, start=1):
             if pattern.search(line):
                 findings.append(_make_finding(
                     file_path=file_path,
-                    line_number=i,
-                    rule_id="js.var-declaration",
+                    line_number=idx,
+                    rule_id="js.no-var",
                     category=JSRuleCategory.CODE_SMELL,
                     severity=JSSeverity.WARNING,
-                    title="var declaration",
-                    description="Use let or const instead of var. var has function scope and hoisting which can cause bugs.",
+                    title="Use let or const instead of var",
+                    description="var has function scope and hoisting behavior that can cause subtle bugs.",
                     code_snippet=line,
-                    fix_suggestion="Replace var with const (if not reassigned) or let (if reassigned).",
+                    fix_suggestion="Replace var with const (preferred) or let.",
                 ))
         return findings
 
-    def _rule_no_empty_function(self, file_path: str, lines: List[str]) -> List[JSFinding]:
-        """js.no-empty-function: Empty function bodies."""
-        if not self._config.is_rule_enabled("js.no-empty-function"):
+    def _check_no_empty_block(self, file_path: str, lines: List[str]) -> List[JSFinding]:
+        """js.no-empty-block: empty block {}."""
+        if not self._is_rule_enabled("js.no-empty-block"):
             return []
-        findings = []
-        # Named functions: function foo() {}
-        named_pattern = re.compile(r'\bfunction\s+\w+\s*\([^)]*\)\s*\{\s*\}')
-        # Arrow functions with empty body: => {}
-        arrow_pattern = re.compile(r'=>\s*\{\s*\}')
-        for i, line in enumerate(lines, start=1):
-            stripped = line.strip()
-            if stripped.startswith("//") or stripped.startswith("*"):
-                continue
-            if named_pattern.search(line) or arrow_pattern.search(line):
+        findings: List[JSFinding] = []
+        pattern = re.compile(r"\{\s*\}")
+        for idx, line in enumerate(lines, start=1):
+            if pattern.search(line):
                 findings.append(_make_finding(
                     file_path=file_path,
-                    line_number=i,
-                    rule_id="js.no-empty-function",
+                    line_number=idx,
+                    rule_id="js.no-empty-block",
                     category=JSRuleCategory.CODE_SMELL,
                     severity=JSSeverity.INFO,
-                    title="Empty function body",
-                    description="Empty function bodies are likely unfinished implementations or dead code.",
+                    title="Empty block statement",
+                    description="Empty blocks are likely unintentional and may hide incomplete logic.",
                     code_snippet=line,
-                    fix_suggestion="Either implement the function body or remove the function if it is unused.",
+                    fix_suggestion="Add a comment or implement the block body.",
                 ))
         return findings
 
-    def _rule_prefer_const(self, file_path: str, lines: List[str]) -> List[JSFinding]:
-        """js.prefer-const: Flag let declarations as INFO (prefer const where possible)."""
-        if not self._config.is_rule_enabled("js.prefer-const"):
+    def _check_no_console(self, file_path: str, lines: List[str]) -> List[JSFinding]:
+        """js.no-console: use of console.log/warn/error/debug."""
+        if not self._is_rule_enabled("js.no-console"):
             return []
-        findings = []
-        pattern = re.compile(r'\blet\s+([a-zA-Z_$][a-zA-Z0-9_$]*)\s*=')
-        for i, line in enumerate(lines, start=1):
-            stripped = line.strip()
-            if stripped.startswith("//") or stripped.startswith("*"):
-                continue
+        findings: List[JSFinding] = []
+        pattern = re.compile(r"console\.(log|warn|error|debug)\s*\(")
+        for idx, line in enumerate(lines, start=1):
             match = pattern.search(line)
             if match:
-                var_name = match.group(1)
-                # Check if the variable is reassigned anywhere else in the file
-                reassignment_pattern = re.compile(
-                    r'\b' + re.escape(var_name) + r'\s*(?:\+|-|\*|/|%|\|\||&&)?='
-                )
-                content = "\n".join(lines)
-                reassignments = reassignment_pattern.findall(content)
-                # More than one match means it was reassigned at least once after declaration
-                if len(reassignments) <= 1:
-                    findings.append(_make_finding(
-                        file_path=file_path,
-                        line_number=i,
-                        rule_id="js.prefer-const",
-                        category=JSRuleCategory.CODE_SMELL,
-                        severity=JSSeverity.INFO,
-                        title="Prefer const over let",
-                        description=f"'{var_name}' is declared with let but does not appear to be reassigned.",
-                        code_snippet=line,
-                        fix_suggestion=f"Change 'let {var_name}' to 'const {var_name}' if not reassigned.",
-                    ))
+                findings.append(_make_finding(
+                    file_path=file_path,
+                    line_number=idx,
+                    rule_id="js.no-console",
+                    category=JSRuleCategory.CODE_SMELL,
+                    severity=JSSeverity.INFO,
+                    title=f"Use of console.{match.group(1)}()",
+                    description="Console logging should be removed or replaced with a proper logger in production.",
+                    code_snippet=line,
+                    fix_suggestion="Remove or replace with a structured logging library.",
+                ))
         return findings
 
-    def _rule_max_lines_per_function(self, file_path: str, lines: List[str]) -> List[JSFinding]:
-        """js.max-lines-per-function: Approximate function line count check."""
-        if not self._config.is_rule_enabled("js.max-lines-per-function"):
+    def _check_max_file_lines(self, file_path: str, lines: List[str]) -> List[JSFinding]:
+        """js.max-file-lines: file exceeds configured maximum line count."""
+        if not self._is_rule_enabled("js.max-file-lines"):
             return []
-        findings = []
-        max_lines = self._config.max_function_lines
-        func_pattern = re.compile(r'\bfunction\s*\*?\s*\w*\s*\([^)]*\)\s*\{')
-
-        i = 0
-        while i < len(lines):
-            match = func_pattern.search(lines[i])
-            if match:
-                func_start = i + 1
-                brace_depth = lines[i].count("{") - lines[i].count("}")
-                j = i + 1
-                while j < len(lines) and brace_depth > 0:
-                    brace_depth += lines[j].count("{") - lines[j].count("}")
-                    j += 1
-                func_lines = j - i
-                if func_lines > max_lines:
-                    findings.append(_make_finding(
-                        file_path=file_path,
-                        line_number=func_start,
-                        rule_id="js.max-lines-per-function",
-                        category=JSRuleCategory.CODE_SMELL,
-                        severity=JSSeverity.WARNING,
-                        title="Function too long",
-                        description=(
-                            f"Function is approximately {func_lines} lines long, "
-                            f"exceeding the maximum of {max_lines}."
-                        ),
-                        code_snippet=lines[i],
-                        fix_suggestion="Break the function into smaller, more focused functions.",
-                    ))
-                i = j
-            else:
-                i += 1
-        return findings
-
-    def _rule_max_file_lines(self, file_path: str, lines: List[str]) -> List[JSFinding]:
-        """js.max-file-lines: File exceeds maximum line count."""
-        if not self._config.is_rule_enabled("js.max-file-lines"):
-            return []
-        max_lines = self._config.max_file_lines
-        if len(lines) > max_lines:
+        count = len(lines)
+        if count > self._config.max_file_lines:
             return [_make_finding(
                 file_path=file_path,
                 line_number=1,
                 rule_id="js.max-file-lines",
                 category=JSRuleCategory.CODE_SMELL,
                 severity=JSSeverity.WARNING,
-                title="File too long",
+                title=f"File exceeds {self._config.max_file_lines} lines ({count} lines)",
                 description=(
-                    f"File has {len(lines)} lines, exceeding the maximum of {max_lines}."
+                    f"This file has {count} lines which exceeds the configured maximum of "
+                    f"{self._config.max_file_lines}. Large files are harder to maintain."
                 ),
-                code_snippet="",
                 fix_suggestion="Split the file into smaller, more focused modules.",
             )]
         return []
 
-    def _rule_no_unused_vars(self, file_path: str, lines: List[str]) -> List[JSFinding]:
-        """js.no-unused-vars: Variables declared but never used elsewhere in the file."""
-        if not self._config.is_rule_enabled("js.no-unused-vars"):
+    # ------------------------------------------------------------------
+    # Complexity rules
+    # ------------------------------------------------------------------
+
+    def _check_complexity(self, file_path: str, lines: List[str]) -> List[JSFinding]:
+        """js.complexity: file-level cyclomatic complexity heuristic."""
+        if not self._is_rule_enabled("js.complexity"):
             return []
-        findings = []
-        content = "\n".join(lines)
-        decl_pattern = re.compile(r'\b(?:const|let|var)\s+([a-zA-Z_$][a-zA-Z0-9_$]*)\s*=')
+        source = "\n".join(lines)
+        decision_keywords = [
+            r"\bif\b",
+            r"\belse if\b",
+            r"\bfor\b",
+            r"\bwhile\b",
+            r"\bcase\b",
+            r"\bcatch\b",
+            r"&&",
+            r"\|\|",
+            r"\?",
+        ]
+        total = sum(len(re.findall(kw, source)) for kw in decision_keywords)
+        threshold = self._config.max_complexity * 5
+        if total > threshold:
+            return [_make_finding(
+                file_path=file_path,
+                line_number=1,
+                rule_id="js.complexity",
+                category=JSRuleCategory.COMPLEXITY,
+                severity=JSSeverity.WARNING,
+                title=f"High file-level complexity (score: {total})",
+                description=(
+                    f"The file has an estimated complexity score of {total} which exceeds "
+                    f"the threshold of {threshold} (max_complexity={self._config.max_complexity} * 5). "
+                    "Consider splitting complex logic into smaller functions."
+                ),
+                fix_suggestion="Extract complex logic into well-named helper functions.",
+            )]
+        return []
 
-        for i, line in enumerate(lines, start=1):
-            stripped = line.strip()
-            if stripped.startswith("//") or stripped.startswith("*"):
-                continue
-            for match in decl_pattern.finditer(line):
-                var_name = match.group(1)
-                # Count all occurrences of this identifier in the file
-                usage_pattern = re.compile(r'\b' + re.escape(var_name) + r'\b')
-                usages = usage_pattern.findall(content)
-                # One occurrence is the declaration itself
-                if len(usages) <= 1:
-                    findings.append(_make_finding(
-                        file_path=file_path,
-                        line_number=i,
-                        rule_id="js.no-unused-vars",
-                        category=JSRuleCategory.CODE_SMELL,
-                        severity=JSSeverity.WARNING,
-                        title="Unused variable",
-                        description=f"Variable '{var_name}' is declared but never used.",
-                        code_snippet=line,
-                        fix_suggestion=f"Remove the declaration of '{var_name}' or use it.",
-                    ))
-        return findings
+    # ------------------------------------------------------------------
+    # Style rules
+    # ------------------------------------------------------------------
 
-    # --- Complexity Rules ---
-
-    def _rule_complexity(self, file_path: str, lines: List[str]) -> List[JSFinding]:
-        """js.complexity: Approximate cyclomatic complexity per function."""
-        if not self._config.is_rule_enabled("js.complexity"):
+    def _check_no_trailing_spaces(self, file_path: str, lines: List[str]) -> List[JSFinding]:
+        """js.no-trailing-spaces: lines with trailing whitespace."""
+        if not self._is_rule_enabled("js.no-trailing-spaces"):
             return []
-        findings = []
-        max_complexity = self._config.max_complexity
-        func_pattern = re.compile(r'\bfunction\s*\*?\s*\w*\s*\([^)]*\)\s*\{')
-        complexity_tokens = re.compile(
-            r'\b(?:if|else\s+if|for|while|case|catch)\b|&&|\|\||\?(?!:)'
-        )
-
-        i = 0
-        while i < len(lines):
-            match = func_pattern.search(lines[i])
-            if match:
-                func_start = i + 1
-                brace_depth = lines[i].count("{") - lines[i].count("}")
-                complexity = 1
-                j = i + 1
-                while j < len(lines) and brace_depth > 0:
-                    brace_depth += lines[j].count("{") - lines[j].count("}")
-                    complexity += len(complexity_tokens.findall(lines[j]))
-                    j += 1
-                if complexity > max_complexity:
-                    findings.append(_make_finding(
-                        file_path=file_path,
-                        line_number=func_start,
-                        rule_id="js.complexity",
-                        category=JSRuleCategory.COMPLEXITY,
-                        severity=JSSeverity.WARNING,
-                        title="High cyclomatic complexity",
-                        description=(
-                            f"Function has an approximate cyclomatic complexity of {complexity}, "
-                            f"exceeding the threshold of {max_complexity}."
-                        ),
-                        code_snippet=lines[i],
-                        fix_suggestion="Refactor into smaller functions to reduce complexity.",
-                    ))
-                i = j
-            else:
-                i += 1
-        return findings
-
-    # --- Style Rules ---
-
-    def _rule_semi(self, file_path: str, lines: List[str]) -> List[JSFinding]:
-        """js.semi: Lines that appear to be missing a terminating semicolon."""
-        if not self._config.is_rule_enabled("js.semi"):
-            return []
-        findings = []
-        # Lines that should end with semicolon: not ending in { } , ; or being blank/comments
-        missing_semi_pattern = re.compile(
-            r'^(?!\s*(?://|/\*|\*|$)).*[a-zA-Z0-9_$\'"`\])]$'
-        )
-        for i, line in enumerate(lines, start=1):
-            stripped = line.rstrip()
-            if not stripped:
-                continue
-            if stripped.endswith(("{", "}", ",", ";", ":", "(")):
-                continue
-            if stripped.strip().startswith(("//", "*", "/*", "import ", "export ")):
-                continue
-            if missing_semi_pattern.match(stripped):
+        findings: List[JSFinding] = []
+        pattern = re.compile(r"\s+$")
+        for idx, line in enumerate(lines, start=1):
+            if pattern.search(line):
                 findings.append(_make_finding(
                     file_path=file_path,
-                    line_number=i,
-                    rule_id="js.semi",
+                    line_number=idx,
+                    rule_id="js.no-trailing-spaces",
                     category=JSRuleCategory.STYLE,
                     severity=JSSeverity.INFO,
-                    title="Missing semicolon",
-                    description="Line may be missing a terminating semicolon.",
+                    title="Trailing whitespace",
+                    description="This line has trailing whitespace characters.",
                     code_snippet=line,
-                    fix_suggestion="Add a semicolon at the end of the statement.",
+                    fix_suggestion="Remove trailing whitespace.",
                 ))
         return findings
 
-    def _rule_eol_last(self, file_path: str, content: str) -> List[JSFinding]:
-        """js.eol-last: File does not end with a newline character."""
-        if not self._config.is_rule_enabled("js.eol-last"):
+    def _check_max_line_length(self, file_path: str, lines: List[str]) -> List[JSFinding]:
+        """js.max-line-length: lines exceeding 120 characters."""
+        if not self._is_rule_enabled("js.max-line-length"):
             return []
-        if content and not content.endswith("\n"):
-            return [_make_finding(
-                file_path=file_path,
-                line_number=content.count("\n") + 1,
-                rule_id="js.eol-last",
-                category=JSRuleCategory.STYLE,
-                severity=JSSeverity.INFO,
-                title="Missing newline at end of file",
-                description="Files should end with a newline character.",
-                code_snippet="",
-                fix_suggestion="Add a newline at the end of the file.",
-            )]
-        return []
+        findings: List[JSFinding] = []
+        for idx, line in enumerate(lines, start=1):
+            if len(line) > 120:
+                findings.append(_make_finding(
+                    file_path=file_path,
+                    line_number=idx,
+                    rule_id="js.max-line-length",
+                    category=JSRuleCategory.STYLE,
+                    severity=JSSeverity.INFO,
+                    title=f"Line exceeds 120 characters ({len(line)} chars)",
+                    description=f"This line is {len(line)} characters long, exceeding the 120-character limit.",
+                    code_snippet=line[:120] + "...",
+                    fix_suggestion="Break the line into shorter segments.",
+                ))
+        return findings

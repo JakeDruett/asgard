@@ -1,8 +1,4 @@
-"""
-Heimdall JavaScript analysis subpackage.
-
-Provides regex-based static analysis for JavaScript and JSX files.
-"""
+"""JavaScript quality analysis subpackage."""
 
 from Asgard.Heimdall.Quality.languages.javascript.models.js_models import (
     JSAnalysisConfig,

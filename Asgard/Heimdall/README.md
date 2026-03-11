@@ -73,7 +73,7 @@ python -m Heimdall coverage gaps ./src
 ### Python API Usage
 
 ```python
-from Asgard.Heimdall import (
+from Heimdall import (
     FileAnalyzer,
     AnalysisConfig,
     StaticSecurityService,

@@ -15,7 +15,7 @@ Usage:
     python -m Heimdall performance database ./src
 
 Example:
-    from Asgard.Heimdall.Performance import StaticPerformanceService
+    from Heimdall.Performance import StaticPerformanceService
 
     service = StaticPerformanceService()
     report = service.scan("./src")
