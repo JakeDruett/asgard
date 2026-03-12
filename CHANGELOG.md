@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-03-12
+
+### Changed
+- License changed from MIT to Polyform Noncommercial 1.0.0 (free for personal and non-commercial use; commercial use requires a separate license)
+
 ## [1.1.0] - 2026-03-12
 
 ### Added
@@ -82,6 +87,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Removed
 - Legacy setup.py build configuration (replaced by pyproject.toml)
 
-[Unreleased]: https://github.com/JakeDruett/asgard/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/JakeDruett/asgard/compare/v1.2.0...HEAD
+[1.2.0]: https://github.com/JakeDruett/asgard/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/JakeDruett/asgard/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/JakeDruett/asgard/releases/tag/v1.0.0

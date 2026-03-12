@@ -306,4 +306,4 @@ Asgard/
 
 ## License
 
-MIT License — see [LICENSE](LICENSE) for details.
+Polyform Noncommercial License 1.0.0 — free for personal and non-commercial use. Commercial use requires a separate license. See [LICENSE](LICENSE) for details.
