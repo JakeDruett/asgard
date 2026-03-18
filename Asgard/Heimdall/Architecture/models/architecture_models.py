@@ -32,6 +32,23 @@ class ViolationSeverity(Enum):
     CRITICAL = "critical"
 
 
+class HexagonalZone(Enum):
+    """Hexagonal architecture zones."""
+
+    DOMAIN = "domain"
+    PORT = "port"
+    ADAPTER = "adapter"
+    INFRASTRUCTURE = "infrastructure"
+    UNASSIGNED = "unassigned"
+
+
+class PortDirection(Enum):
+    """Port direction in hexagonal architecture."""
+
+    INBOUND = "inbound"
+    OUTBOUND = "outbound"
+
+
 class PatternType(Enum):
     """Common design patterns."""
 
@@ -70,7 +87,14 @@ class ArchitectureConfig:
 
     scan_path: Path = field(default_factory=lambda: Path("."))
     exclude_patterns: List[str] = field(
-        default_factory=lambda: ["__pycache__", ".git", ".venv", "node_modules"]
+        default_factory=lambda: [
+            "__pycache__", ".git", ".venv", "venv", "env", ".env",
+            "node_modules", "build", "dist", "*.egg-info",
+            ".tox", ".mypy_cache", ".pytest_cache", ".ruff_cache",
+            "site-packages", "*-venv",
+            ".next", ".nuxt", "coverage", "htmlcov",
+            "vendor", "third_party",
+        ]
     )
     include_extensions: List[str] = field(default_factory=lambda: [".py"])
 
@@ -245,6 +269,69 @@ class PatternReport:
 
 
 @dataclass
+class PortDefinition:
+    """A detected port (interface/ABC) in the hexagonal architecture."""
+
+    name: str
+    file_path: str
+    line_number: int
+    direction: PortDirection
+    abstract_methods: List[str] = field(default_factory=list)
+
+
+@dataclass
+class AdapterDefinition:
+    """A detected adapter implementing a port."""
+
+    name: str
+    file_path: str
+    line_number: int
+    implements_port: str
+    zone: HexagonalZone = HexagonalZone.ADAPTER
+    framework_imports: List[str] = field(default_factory=list)
+
+
+@dataclass
+class HexagonalViolation:
+    """A violation of hexagonal architecture rules."""
+
+    file_path: str
+    line_number: int
+    source_zone: HexagonalZone
+    target_zone: HexagonalZone
+    class_name: str
+    message: str
+    severity: ViolationSeverity = ViolationSeverity.MODERATE
+
+
+@dataclass
+class HexagonalReport:
+    """Report of hexagonal architecture analysis."""
+
+    scan_path: str = ""
+    scanned_at: datetime = field(default_factory=datetime.now)
+    ports: List[PortDefinition] = field(default_factory=list)
+    adapters: List[AdapterDefinition] = field(default_factory=list)
+    zone_assignments: Dict[str, str] = field(default_factory=dict)
+    violations: List[HexagonalViolation] = field(default_factory=list)
+    scan_duration_seconds: float = 0.0
+
+    @property
+    def total_violations(self) -> int:
+        """Get total violation count."""
+        return len(self.violations)
+
+    @property
+    def is_valid(self) -> bool:
+        """Check if hexagonal architecture is valid (no violations)."""
+        return len(self.violations) == 0
+
+    def add_violation(self, violation: HexagonalViolation) -> None:
+        """Add a violation to the report."""
+        self.violations.append(violation)
+
+
+@dataclass
 class ArchitectureReport:
     """Combined architecture analysis report."""
 
@@ -253,6 +340,7 @@ class ArchitectureReport:
     solid_report: Optional[SOLIDReport] = None
     layer_report: Optional[LayerReport] = None
     pattern_report: Optional[PatternReport] = None
+    hexagonal_report: Optional[HexagonalReport] = None
     scan_duration_seconds: float = 0.0
 
     @property
@@ -263,6 +351,8 @@ class ArchitectureReport:
             total += self.solid_report.total_violations
         if self.layer_report:
             total += self.layer_report.total_violations
+        if self.hexagonal_report:
+            total += self.hexagonal_report.total_violations
         return total
 
     @property

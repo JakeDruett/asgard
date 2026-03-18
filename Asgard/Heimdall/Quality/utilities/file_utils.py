@@ -20,7 +20,7 @@ DEFAULT_EXCLUDE_DIRS: Set[str] = {
     "__pycache__", "node_modules", ".git", ".venv", "venv", "env",
     ".env", "build", "dist", ".next", "coverage", ".tox", ".mypy_cache",
     ".pytest_cache", ".ruff_cache", "htmlcov", "eggs", ".eggs",
-    "*.egg-info", "migrations",
+    "*.egg-info", "migrations", "assets", "*-venv", "site-packages",
 }
 
 DEFAULT_EXCLUDE_FILES: Set[str] = {

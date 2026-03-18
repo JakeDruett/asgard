@@ -688,6 +688,11 @@ def add_arch_args(parser: argparse.ArgumentParser) -> None:
         help="Skip design pattern detection",
     )
     parser.add_argument(
+        "--hexagonal",
+        action="store_true",
+        help="Include hexagonal (ports and adapters) architecture analysis",
+    )
+    parser.add_argument(
         "--exclude",
         "-x",
         type=str,
@@ -1021,6 +1026,100 @@ def add_typing_args(parser: argparse.ArgumentParser) -> None:
         nargs="+",
         default=[],
         help="Glob patterns for paths to exclude from scanning",
+    )
+
+
+def add_type_check_args(parser: argparse.ArgumentParser) -> None:
+    """Add static type checking (Pyright/Pylance) arguments to a parser."""
+    parser.add_argument(
+        "path",
+        type=str,
+        nargs="?",
+        default=".",
+        help="Root path to type-check (default: current directory)",
+    )
+    parser.add_argument(
+        "--format",
+        "-f",
+        choices=["text", "json", "markdown"],
+        default="text",
+        help="Output format (default: text)",
+    )
+    parser.add_argument(
+        "--mode",
+        "-m",
+        choices=["off", "basic", "standard", "strict", "all"],
+        default="basic",
+        help="Pyright type checking mode (default: basic). "
+             "'basic' matches Pylance defaults; 'strict' enables all checks.",
+    )
+    parser.add_argument(
+        "--python-version",
+        type=str,
+        default="",
+        help="Python version to target (e.g. 3.12). Auto-detected if not set.",
+    )
+    parser.add_argument(
+        "--python-platform",
+        type=str,
+        default="",
+        help="Python platform to target (e.g. Linux). Auto-detected if not set.",
+    )
+    parser.add_argument(
+        "--venv-path",
+        type=str,
+        default="",
+        help="Path to virtual environment for import resolution.",
+    )
+    parser.add_argument(
+        "--include-tests",
+        action="store_true",
+        help="Include test files in analysis",
+    )
+    parser.add_argument(
+        "--include-warnings",
+        action="store_true",
+        default=True,
+        help="Include warnings in output (default: True)",
+    )
+    parser.add_argument(
+        "--errors-only",
+        action="store_true",
+        help="Show only errors (suppress warnings and info)",
+    )
+    parser.add_argument(
+        "--severity",
+        "-s",
+        choices=["error", "warning", "information"],
+        default=None,
+        help="Filter output to only this severity level",
+    )
+    parser.add_argument(
+        "--category",
+        "-c",
+        choices=[
+            "type_mismatch", "missing_import", "undefined_variable",
+            "argument_error", "return_type", "attribute_error",
+            "assignment_error", "operator_error", "override_error",
+            "generic_error", "protocol_error", "typed_dict_error",
+            "overload_error", "unreachable_code", "deprecated", "general",
+        ],
+        default=None,
+        help="Filter output to only this diagnostic category",
+    )
+    parser.add_argument(
+        "--exclude",
+        "-x",
+        type=str,
+        nargs="+",
+        default=[],
+        help="Glob patterns for paths to exclude from scanning",
+    )
+    parser.add_argument(
+        "--npx-path",
+        type=str,
+        default="npx",
+        help="Path to npx binary (default: npx)",
     )
 
 

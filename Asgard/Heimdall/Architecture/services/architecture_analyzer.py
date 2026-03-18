@@ -11,6 +11,7 @@ from typing import Optional
 from Asgard.Heimdall.Architecture.models.architecture_models import (
     ArchitectureConfig,
     ArchitectureReport,
+    HexagonalReport,
     LayerDefinition,
     LayerReport,
     PatternReport,
@@ -19,6 +20,7 @@ from Asgard.Heimdall.Architecture.models.architecture_models import (
 from Asgard.Heimdall.Architecture.services.solid_validator import SOLIDValidator
 from Asgard.Heimdall.Architecture.services.layer_analyzer import LayerAnalyzer
 from Asgard.Heimdall.Architecture.services.pattern_detector import PatternDetector
+from Asgard.Heimdall.Architecture.services.hexagonal_analyzer import HexagonalAnalyzer
 
 
 class ArchitectureAnalyzer:
@@ -39,13 +41,15 @@ class ArchitectureAnalyzer:
         self.solid_validator = SOLIDValidator(self.config)
         self.layer_analyzer = LayerAnalyzer(self.config)
         self.pattern_detector = PatternDetector(self.config)
+        self.hexagonal_analyzer = HexagonalAnalyzer(self.config)
 
     def analyze(
         self,
         scan_path: Optional[Path] = None,
         validate_solid: bool = True,
         analyze_layers: bool = True,
-        detect_patterns: bool = True
+        detect_patterns: bool = True,
+        analyze_hexagonal: bool = False,
     ) -> ArchitectureReport:
         """
         Perform complete architecture analysis.
@@ -78,6 +82,9 @@ class ArchitectureAnalyzer:
 
         if detect_patterns:
             report.pattern_report = self.pattern_detector.detect(path)
+
+        if analyze_hexagonal:
+            report.hexagonal_report = self.hexagonal_analyzer.analyze(path)
 
         report.scan_duration_seconds = time.time() - start_time
 
@@ -117,6 +124,21 @@ class ArchitectureAnalyzer:
             self.layer_analyzer.set_layers(custom_layers)
 
         return self.layer_analyzer.analyze(scan_path)
+
+    def analyze_hexagonal(
+        self,
+        scan_path: Optional[Path] = None
+    ) -> HexagonalReport:
+        """
+        Analyze hexagonal architecture only.
+
+        Args:
+            scan_path: Root path to scan
+
+        Returns:
+            HexagonalReport with violations, ports, and adapters
+        """
+        return self.hexagonal_analyzer.analyze(scan_path)
 
     def detect_patterns(
         self,
@@ -214,6 +236,18 @@ class ArchitectureAnalyzer:
 
             lines.append("")
 
+        # Hexagonal summary
+        if result.hexagonal_report:
+            lines.append("-" * 70)
+            lines.append("  HEXAGONAL ARCHITECTURE")
+            lines.append("-" * 70)
+            lines.append("")
+            lines.append(f"  Ports Found:       {len(result.hexagonal_report.ports)}")
+            lines.append(f"  Adapters Found:    {len(result.hexagonal_report.adapters)}")
+            lines.append(f"  Violations Found:  {result.hexagonal_report.total_violations}")
+            lines.append(f"  Status:            {'VALID' if result.hexagonal_report.is_valid else 'INVALID'}")
+            lines.append("")
+
         # Recommendations
         lines.append("-" * 70)
         lines.append("  RECOMMENDATIONS")
@@ -295,6 +329,37 @@ class ArchitectureAnalyzer:
                         "confidence": p.confidence,
                     }
                     for p in result.pattern_report.patterns
+                ],
+            }
+
+        if result.hexagonal_report:
+            output["hexagonal"] = {
+                "is_valid": result.hexagonal_report.is_valid,
+                "total_violations": result.hexagonal_report.total_violations,
+                "ports": [
+                    {
+                        "name": p.name,
+                        "direction": p.direction.value,
+                        "abstract_methods": p.abstract_methods,
+                    }
+                    for p in result.hexagonal_report.ports
+                ],
+                "adapters": [
+                    {
+                        "name": a.name,
+                        "implements_port": a.implements_port,
+                        "zone": a.zone.value,
+                    }
+                    for a in result.hexagonal_report.adapters
+                ],
+                "violations": [
+                    {
+                        "source_zone": v.source_zone.value,
+                        "target_zone": v.target_zone.value,
+                        "message": v.message,
+                        "severity": v.severity.value,
+                    }
+                    for v in result.hexagonal_report.violations
                 ],
             }
 
@@ -381,6 +446,31 @@ class ArchitectureAnalyzer:
 
             lines.append("")
 
+        # Hexagonal section
+        if result.hexagonal_report:
+            lines.append("## Hexagonal Architecture")
+            lines.append("")
+            lines.append(f"- **Status:** {'Valid' if result.hexagonal_report.is_valid else 'Invalid'}")
+            lines.append(f"- **Ports:** {len(result.hexagonal_report.ports)}")
+            lines.append(f"- **Adapters:** {len(result.hexagonal_report.adapters)}")
+            lines.append(f"- **Violations:** {result.hexagonal_report.total_violations}")
+            lines.append("")
+
+            if result.hexagonal_report.violations:
+                lines.append("### Hexagonal Violations")
+                lines.append("")
+                lines.append("| Severity | Source Zone | Target Zone | Message |")
+                lines.append("|----------|------------|-------------|---------|")
+
+                for v in result.hexagonal_report.violations[:10]:
+                    lines.append(
+                        f"| {v.severity.value.upper()} | "
+                        f"{v.source_zone.value} | {v.target_zone.value} | "
+                        f"{v.message[:60]} |"
+                    )
+
+                lines.append("")
+
         # Recommendations
         lines.append("## Recommendations")
         lines.append("")
@@ -418,6 +508,16 @@ class ArchitectureAnalyzer:
             if result.pattern_report.total_patterns == 0:
                 recommendations.append(
                     "Consider using design patterns for common scenarios"
+                )
+
+        if result.hexagonal_report:
+            if not result.hexagonal_report.is_valid:
+                recommendations.append(
+                    f"Fix {result.hexagonal_report.total_violations} hexagonal architecture violations"
+                )
+            if not result.hexagonal_report.ports:
+                recommendations.append(
+                    "No ports detected -- define abstract base classes for domain boundaries"
                 )
 
         if not recommendations:

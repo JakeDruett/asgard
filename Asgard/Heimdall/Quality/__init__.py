@@ -180,6 +180,15 @@ from Asgard.Heimdall.Quality.models.naming_models import (
 )
 from Asgard.Heimdall.Quality.services.documentation_scanner import DocumentationScanner
 from Asgard.Heimdall.Quality.services.naming_convention_scanner import NamingConventionScanner
+from Asgard.Heimdall.Quality.models.type_check_models import (
+    FileTypeCheckStats,
+    TypeCheckCategory,
+    TypeCheckConfig,
+    TypeCheckDiagnostic,
+    TypeCheckReport,
+    TypeCheckSeverity,
+)
+from Asgard.Heimdall.Quality.services.type_checker import TypeChecker
 from Asgard.Heimdall.Quality.BugDetection import (
     BugCategory,
     BugDetectionConfig,
@@ -304,6 +313,14 @@ __all__ = [
     "BugSeverity",
     "NullDereferenceDetector",
     "UnreachableCodeDetector",
+    # Static type checking (Pyright/Pylance)
+    "FileTypeCheckStats",
+    "TypeCheckCategory",
+    "TypeCheckConfig",
+    "TypeCheckDiagnostic",
+    "TypeCheckReport",
+    "TypeCheckSeverity",
+    "TypeChecker",
     # JavaScript/TypeScript analysis
     "JSAnalysisConfig",
     "JSAnalyzer",

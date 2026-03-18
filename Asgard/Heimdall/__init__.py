@@ -154,6 +154,8 @@ from Asgard.Heimdall.Dependencies import (
 from Asgard.Heimdall.Architecture import (
     ArchitectureConfig,
     ArchitectureReport,
+    HexagonalAnalyzer,
+    HexagonalReport,
     SOLIDReport,
     ArchitectureAnalyzer,
 )
@@ -244,6 +246,8 @@ __all__ = [
     # Architecture exports
     "ArchitectureConfig",
     "ArchitectureReport",
+    "HexagonalAnalyzer",
+    "HexagonalReport",
     "SOLIDReport",
     "ArchitectureAnalyzer",
     # Coverage exports

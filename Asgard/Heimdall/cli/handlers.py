@@ -119,6 +119,11 @@ from Asgard.Heimdall.Quality.models.typing_models import (
 )
 from Asgard.Heimdall.Quality.services.typing_scanner import TypingScanner
 
+from Asgard.Heimdall.Quality.models.type_check_models import (
+    TypeCheckConfig,
+)
+from Asgard.Heimdall.Quality.services.type_checker import TypeChecker
+
 from Asgard.Heimdall.Quality.models.thread_safety_models import (
     ThreadSafetyConfig,
     ThreadSafetySeverity,
@@ -954,14 +959,9 @@ def run_arch_analysis(args: argparse.Namespace, verbose: bool = False, analysis_
         print(f"Error: Path does not exist: {scan_path}")
         return 1
 
-    exclude_patterns = list(args.exclude) if args.exclude else []
-
-    config = ArchitectureConfig(
-        scan_path=scan_path,
-        exclude_patterns=exclude_patterns,
-        output_format=args.format,
-        verbose=verbose,
-    )
+    config = ArchitectureConfig(scan_path=scan_path)
+    if args.exclude:
+        config.exclude_patterns = list(set(config.exclude_patterns) | set(args.exclude))
 
     try:
         analyzer = ArchitectureAnalyzer(config)
@@ -969,12 +969,14 @@ def run_arch_analysis(args: argparse.Namespace, verbose: bool = False, analysis_
         validate_solid = not getattr(args, 'no_solid', False) if analysis_type == "all" else analysis_type == "solid"
         analyze_layers = not getattr(args, 'no_layers', False) if analysis_type == "all" else analysis_type == "layers"
         detect_patterns = not getattr(args, 'no_patterns', False) if analysis_type == "all" else analysis_type == "patterns"
+        analyze_hexagonal = getattr(args, 'hexagonal', False) if analysis_type == "all" else analysis_type == "hexagonal"
 
         result = analyzer.analyze(
             scan_path,
             validate_solid=validate_solid,
             analyze_layers=analyze_layers,
-            detect_patterns=detect_patterns
+            detect_patterns=detect_patterns,
+            analyze_hexagonal=analyze_hexagonal,
         )
         report = analyzer.generate_report(result, args.format)
         print(report)
@@ -1392,6 +1394,56 @@ def run_typing_analysis(args: argparse.Namespace, verbose: bool = False) -> int:
         print(report)
         return 1 if result.has_violations else 0
 
+    except FileNotFoundError as e:
+        print(f"Error: {e}")
+        return 1
+    except Exception as e:
+        print(f"Error: {e}")
+        return 1
+
+
+def run_type_check_analysis(args: argparse.Namespace, verbose: bool = False) -> int:
+    """Execute static type checking using Pyright (Pylance engine)."""
+    scan_path = Path(args.path).resolve()
+
+    if not scan_path.exists():
+        print(f"Error: Path does not exist: {scan_path}")
+        return 1
+
+    exclude_patterns = list(args.exclude) if args.exclude else []
+
+    # Handle errors-only flag
+    include_warnings = True
+    severity_filter = getattr(args, "severity", None)
+    if getattr(args, "errors_only", False):
+        severity_filter = "error"
+        include_warnings = False
+
+    config = TypeCheckConfig(
+        type_checking_mode=getattr(args, "mode", "basic"),
+        python_version=getattr(args, "python_version", ""),
+        python_platform=getattr(args, "python_platform", ""),
+        venv_path=getattr(args, "venv_path", ""),
+        include_tests=getattr(args, "include_tests", False),
+        include_warnings=include_warnings,
+        severity_filter=severity_filter,
+        category_filter=getattr(args, "category", None),
+        exclude_patterns=exclude_patterns,
+        output_format=args.format,
+        verbose=verbose,
+        npx_path=getattr(args, "npx_path", "npx"),
+    )
+
+    try:
+        checker = TypeChecker(config)
+        result = checker.analyze(scan_path)
+        report = checker.generate_report(result, args.format)
+        print(report)
+        return 1 if result.has_violations else 0
+
+    except RuntimeError as e:
+        print(f"Error: {e}")
+        return 1
     except FileNotFoundError as e:
         print(f"Error: {e}")
         return 1
@@ -3848,3 +3900,399 @@ def run_dashboard(args: argparse.Namespace, verbose: bool = False) -> int:
     server = DashboardServer(config)
     server.run()
     return 0
+
+
+# ---------------------------------------------------------------------------
+# Scan command handler (runs ALL analyses)
+# ---------------------------------------------------------------------------
+
+
+def run_full_scan(args: argparse.Namespace, verbose: bool = False) -> int:
+    """Execute a full scan running all analysis categories."""
+    scan_path = Path(args.path).resolve()
+
+    if not scan_path.exists():
+        print(f"Error: Path does not exist: {scan_path}")
+        return 1
+
+    output_format = getattr(args, "format", "text")
+    exclude_patterns = list(args.exclude) if getattr(args, "exclude", None) else []
+    include_tests = getattr(args, "include_tests", False)
+    start_time = datetime.now()
+
+    # Default excludes for full scan - large non-code directories
+    scan_excludes = [
+        "__pycache__", "node_modules", ".git", ".venv", "venv",
+        "build", "dist", "assets", "*-venv", "site-packages",
+        "android", ".gradle", ".next", "coverage", ".tox",
+        ".mypy_cache", ".pytest_cache", ".ruff_cache",
+        "*.egg-info", "_*",
+    ]
+    # Merge user excludes (user patterns take priority / are additive)
+    for pattern in exclude_patterns:
+        if pattern not in scan_excludes:
+            scan_excludes.append(pattern)
+    exclude_patterns = scan_excludes
+
+    # Track results from all scans
+    scan_results = {}
+    overall_exit = 0
+
+    print("=" * 70)
+    print("  HEIMDALL FULL SCAN")
+    print("  Running all analysis categories...")
+    print("=" * 70)
+    print()
+
+    # ---- 1. Quality: File Length ----
+    print("[1/10] Quality: File Length Analysis...")
+    try:
+        config = AnalysisConfig(
+            scan_path=scan_path,
+            default_threshold=getattr(args, "threshold", 300) or 300,
+            exclude_patterns=exclude_patterns,
+            output_format=output_format,
+            verbose=verbose,
+        )
+        analyzer = FileAnalyzer(config)
+        result = analyzer.analyze()
+        scan_results["file_length"] = {
+            "violations": result.files_exceeding_threshold,
+            "files_scanned": result.total_files_scanned,
+            "compliance_rate": result.compliance_rate,
+            "status": "PASS" if not result.has_violations else "FAIL",
+        }
+        if result.has_violations:
+            overall_exit = 1
+        print(f"       {result.files_exceeding_threshold} violations in {result.total_files_scanned} files")
+    except Exception as e:
+        scan_results["file_length"] = {"status": "ERROR", "error": str(e)}
+        print(f"       Error: {e}")
+
+    # ---- 2. Quality: Complexity ----
+    print("[2/10] Quality: Complexity Analysis...")
+    try:
+        complexity_config = ComplexityConfig(
+            scan_path=scan_path,
+            include_tests=include_tests,
+            exclude_patterns=exclude_patterns,
+            verbose=verbose,
+        )
+        complexity_analyzer = ComplexityAnalyzer(complexity_config)
+        complexity_result = complexity_analyzer.analyze()
+        violation_count = len(complexity_result.violations) if hasattr(complexity_result, "violations") else 0
+        scan_results["complexity"] = {
+            "violations": violation_count,
+            "status": "PASS" if not complexity_result.has_violations else "FAIL",
+        }
+        if complexity_result.has_violations:
+            overall_exit = 1
+        print(f"       {violation_count} violations found")
+    except Exception as e:
+        scan_results["complexity"] = {"status": "ERROR", "error": str(e)}
+        print(f"       Error: {e}")
+
+    # ---- 3. Quality: Lazy Imports ----
+    print("[3/10] Quality: Lazy Import Detection...")
+    try:
+        lazy_config = LazyImportConfig(
+            scan_path=scan_path,
+            include_tests=include_tests,
+            exclude_patterns=exclude_patterns,
+            verbose=verbose,
+        )
+        lazy_scanner = LazyImportScanner(lazy_config)
+        lazy_result = lazy_scanner.analyze(scan_path)
+        lazy_count = lazy_result.total_violations
+        scan_results["lazy_imports"] = {
+            "violations": lazy_count,
+            "files_scanned": lazy_result.files_scanned,
+            "status": "PASS" if not lazy_result.has_violations else "FAIL",
+        }
+        if lazy_result.has_violations:
+            overall_exit = 1
+        print(f"       {lazy_count} violations in {lazy_result.files_scanned} files")
+    except Exception as e:
+        scan_results["lazy_imports"] = {"status": "ERROR", "error": str(e)}
+        print(f"       Error: {e}")
+
+    # ---- 4. Quality: Env Fallbacks ----
+    print("[4/10] Quality: Environment Variable Fallback Detection...")
+    try:
+        env_config = EnvFallbackConfig(
+            scan_path=scan_path,
+            include_tests=include_tests,
+            exclude_patterns=exclude_patterns,
+            verbose=verbose,
+        )
+        env_scanner = EnvFallbackScanner(env_config)
+        env_result = env_scanner.analyze(scan_path)
+        env_count = env_result.total_violations
+        scan_results["env_fallbacks"] = {
+            "violations": env_count,
+            "files_scanned": env_result.files_scanned,
+            "status": "PASS" if not env_result.has_violations else "FAIL",
+        }
+        if env_result.has_violations:
+            overall_exit = 1
+        print(f"       {env_count} violations in {env_result.files_scanned} files")
+    except Exception as e:
+        scan_results["env_fallbacks"] = {"status": "ERROR", "error": str(e)}
+        print(f"       Error: {e}")
+
+    # ---- 5. Quality: Type Checking (Pyright) ----
+    print("[5/10] Quality: Static Type Checking (Pyright)...")
+    try:
+        type_config = TypeCheckConfig(
+            type_checking_mode=getattr(args, "type_check_mode", "basic"),
+            include_tests=include_tests,
+            exclude_patterns=exclude_patterns,
+            include_warnings=False,  # Errors only for full scan
+            verbose=verbose,
+        )
+        type_checker = TypeChecker(type_config)
+        type_result = type_checker.analyze(scan_path)
+        scan_results["type_check"] = {
+            "errors": type_result.total_errors,
+            "warnings": type_result.total_warnings,
+            "files_analyzed": type_result.files_scanned,
+            "files_with_errors": type_result.files_with_errors,
+            "errors_by_category": type_result.errors_by_category,
+            "status": "PASS" if type_result.is_compliant else "FAIL",
+        }
+        if type_result.has_violations:
+            overall_exit = 1
+        print(f"       {type_result.total_errors} errors, {type_result.total_warnings} warnings in {type_result.files_scanned} files")
+    except Exception as e:
+        scan_results["type_check"] = {"status": "ERROR", "error": str(e)}
+        print(f"       Error: {e}")
+
+    # ---- 6. Security ----
+    print("[6/10] Security: Vulnerability Scan...")
+    try:
+        from Asgard.Heimdall.Security import StaticSecurityService, SecurityScanConfig
+        sec_config = SecurityScanConfig(
+            scan_path=scan_path,
+            min_severity="low",
+            include_tests=include_tests,
+            exclude_patterns=exclude_patterns,
+            verbose=verbose,
+        )
+        sec_service = StaticSecurityService(sec_config)
+        sec_result = sec_service.scan(scan_path)
+        sec_total = sec_result.total_findings if hasattr(sec_result, "total_findings") else 0
+        sec_critical = sec_result.critical_count if hasattr(sec_result, "critical_count") else 0
+        scan_results["security"] = {
+            "total_findings": sec_total,
+            "critical": sec_critical,
+            "status": "PASS" if sec_total == 0 else "FAIL",
+        }
+        if sec_total > 0:
+            overall_exit = 1
+        print(f"       {sec_total} findings ({sec_critical} critical)")
+    except Exception as e:
+        scan_results["security"] = {"status": "ERROR", "error": str(e)}
+        print(f"       Error: {e}")
+
+    # ---- 7. Performance ----
+    print("[7/10] Performance: Pattern Analysis...")
+    try:
+        from Asgard.Heimdall.Performance import StaticPerformanceService, PerformanceScanConfig
+        perf_config = PerformanceScanConfig(
+            scan_path=scan_path,
+            include_tests=include_tests,
+            exclude_patterns=exclude_patterns,
+            verbose=verbose,
+        )
+        perf_service = StaticPerformanceService(perf_config)
+        perf_result = perf_service.scan(scan_path)
+        perf_total = perf_result.total_findings if hasattr(perf_result, "total_findings") else 0
+        scan_results["performance"] = {
+            "total_findings": perf_total,
+            "status": "PASS" if perf_total == 0 else "FAIL",
+        }
+        if perf_total > 0:
+            overall_exit = 1
+        print(f"       {perf_total} findings")
+    except Exception as e:
+        scan_results["performance"] = {"status": "ERROR", "error": str(e)}
+        print(f"       Error: {e}")
+
+    # ---- 8. OOP Metrics ----
+    print("[8/10] OOP: Coupling/Cohesion Metrics...")
+    try:
+        from Asgard.Heimdall.OOP import OOPAnalyzer, OOPConfig
+        oop_config = OOPConfig(
+            scan_path=scan_path,
+            include_tests=include_tests,
+            exclude_patterns=exclude_patterns,
+            verbose=verbose,
+        )
+        oop_analyzer = OOPAnalyzer(oop_config)
+        oop_result = oop_analyzer.analyze(scan_path)
+        oop_violations = oop_result.total_violations if hasattr(oop_result, "total_violations") else 0
+        scan_results["oop"] = {
+            "violations": oop_violations,
+            "status": "PASS" if oop_violations == 0 else "FAIL",
+        }
+        if oop_violations > 0:
+            overall_exit = 1
+        print(f"       {oop_violations} violations")
+    except Exception as e:
+        scan_results["oop"] = {"status": "ERROR", "error": str(e)}
+        print(f"       Error: {e}")
+
+    # ---- 9. Architecture ----
+    print("[9/10] Architecture: SOLID/Layer Analysis...")
+    try:
+        from Asgard.Heimdall.Architecture import ArchitectureAnalyzer, ArchitectureConfig
+        arch_config = ArchitectureConfig(
+            scan_path=scan_path,
+            exclude_patterns=exclude_patterns,
+        )
+        arch_analyzer = ArchitectureAnalyzer(arch_config)
+        arch_result = arch_analyzer.analyze(scan_path)
+        arch_violations = arch_result.total_violations if hasattr(arch_result, "total_violations") else 0
+        scan_results["architecture"] = {
+            "violations": arch_violations,
+            "status": "PASS" if arch_violations == 0 else "FAIL",
+        }
+        if arch_violations > 0:
+            overall_exit = 1
+        print(f"       {arch_violations} violations")
+    except Exception as e:
+        scan_results["architecture"] = {"status": "ERROR", "error": str(e)}
+        print(f"       Error: {e}")
+
+    # ---- 10. Dependencies ----
+    print("[10/10] Dependencies: Circular Import Detection...")
+    try:
+        from Asgard.Heimdall.Dependencies import DependencyAnalyzer, DependencyConfig
+        deps_config = DependencyConfig(
+            scan_path=scan_path,
+            include_tests=include_tests,
+            exclude_patterns=exclude_patterns,
+            verbose=verbose,
+        )
+        deps_analyzer = DependencyAnalyzer(deps_config)
+        deps_result = deps_analyzer.analyze(scan_path)
+        deps_cycles = deps_result.cycle_count if hasattr(deps_result, "cycle_count") else 0
+        scan_results["dependencies"] = {
+            "circular_imports": deps_cycles,
+            "status": "PASS" if deps_cycles == 0 else "FAIL",
+        }
+        if deps_cycles > 0:
+            overall_exit = 1
+        print(f"       {deps_cycles} circular dependencies")
+    except Exception as e:
+        scan_results["dependencies"] = {"status": "ERROR", "error": str(e)}
+        print(f"       Error: {e}")
+
+    # ---- Summary ----
+    duration = (datetime.now() - start_time).total_seconds()
+
+    print()
+    print("=" * 70)
+    print("  SCAN COMPLETE")
+    print("=" * 70)
+    print()
+    print(f"  Path:     {scan_path}")
+    print(f"  Duration: {duration:.1f}s")
+    print()
+
+    # Summary table
+    print(f"  {'Category':<35} {'Status':<8} {'Details'}")
+    print(f"  {'-'*35} {'-'*8} {'-'*30}")
+
+    for category, data in scan_results.items():
+        status = data.get("status", "?")
+        status_str = f"{'PASS' if status == 'PASS' else 'FAIL' if status == 'FAIL' else 'ERR '}"
+        label = category.replace("_", " ").title()
+
+        # Build details string
+        if status == "ERROR":
+            detail = data.get("error", "")[:40]
+        elif category == "type_check":
+            detail = f"{data.get('errors', 0)} errors, {data.get('files_with_errors', 0)} files affected"
+        elif category == "security":
+            detail = f"{data.get('total_findings', 0)} findings ({data.get('critical', 0)} critical)"
+        elif "violations" in data:
+            detail = f"{data['violations']} violations"
+        elif "total_findings" in data:
+            detail = f"{data['total_findings']} findings"
+        elif "circular_imports" in data:
+            detail = f"{data['circular_imports']} cycles"
+        else:
+            detail = ""
+
+        print(f"  {label:<35} {status_str:<8} {detail}")
+
+    pass_count = sum(1 for d in scan_results.values() if d.get("status") == "PASS")
+    fail_count = sum(1 for d in scan_results.values() if d.get("status") == "FAIL")
+    error_count = sum(1 for d in scan_results.values() if d.get("status") == "ERROR")
+
+    print()
+    print(f"  Results: {pass_count} passed, {fail_count} failed, {error_count} errors")
+    print(f"  Overall: {'PASSING' if overall_exit == 0 else 'FAILING'}")
+    print()
+    print("=" * 70)
+
+    # JSON output if requested
+    if output_format == "json":
+        report_data = {
+            "scan_path": str(scan_path),
+            "scanned_at": start_time.isoformat(),
+            "duration_seconds": duration,
+            "overall_status": "PASS" if overall_exit == 0 else "FAIL",
+            "categories": scan_results,
+            "summary": {
+                "passed": pass_count,
+                "failed": fail_count,
+                "errors": error_count,
+            },
+        }
+        print()
+        print(json.dumps(report_data, indent=2))
+
+    # Markdown output if requested
+    if output_format == "markdown":
+        lines = [
+            "# Heimdall Full Scan Report",
+            "",
+            f"**Path:** `{scan_path}`",
+            f"**Generated:** {start_time.strftime('%Y-%m-%d %H:%M:%S')}",
+            f"**Duration:** {duration:.1f}s",
+            f"**Overall:** {'PASS' if overall_exit == 0 else 'FAIL'}",
+            "",
+            "## Results",
+            "",
+            "| Category | Status | Details |",
+            "|----------|--------|---------|",
+        ]
+        for category, data in scan_results.items():
+            status = data.get("status", "?")
+            label = category.replace("_", " ").title()
+            if status == "ERROR":
+                detail = data.get("error", "")[:60]
+            elif category == "type_check":
+                detail = f"{data.get('errors', 0)} errors, {data.get('files_with_errors', 0)} files"
+            elif category == "security":
+                detail = f"{data.get('total_findings', 0)} findings ({data.get('critical', 0)} critical)"
+            elif "violations" in data:
+                detail = f"{data['violations']} violations"
+            elif "total_findings" in data:
+                detail = f"{data['total_findings']} findings"
+            elif "circular_imports" in data:
+                detail = f"{data['circular_imports']} cycles"
+            else:
+                detail = ""
+            lines.append(f"| {label} | **{status}** | {detail} |")
+
+        lines.extend([
+            "",
+            f"**Summary:** {pass_count} passed, {fail_count} failed, {error_count} errors",
+        ])
+        print()
+        print("\n".join(lines))
+
+    return overall_exit

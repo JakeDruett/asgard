@@ -20,6 +20,7 @@ from Asgard.Heimdall.cli.common import (
     add_forbidden_imports_args,
     add_datetime_args,
     add_typing_args,
+    add_type_check_args,
     add_thread_safety_args,
     add_race_conditions_args,
     add_daemon_threads_args,
@@ -77,6 +78,7 @@ from Asgard.Heimdall.cli.handlers import (
     run_forbidden_imports_analysis,
     run_datetime_analysis,
     run_typing_analysis,
+    run_type_check_analysis,
     run_thread_safety_analysis,
     run_race_conditions_analysis,
     run_daemon_threads_analysis,
@@ -117,6 +119,7 @@ from Asgard.Heimdall.cli.handlers import (
     run_codefix_suggestions,
     run_mcp_server,
     run_dashboard,
+    run_full_scan,
 )
 
 
@@ -235,6 +238,72 @@ def create_parser() -> argparse.ArgumentParser:
 
     # Dashboard command (top-level)
     _setup_dashboard_command(subparsers)
+
+    # Scan command (runs ALL analyses)
+    scan_parser = subparsers.add_parser(
+        "scan",
+        help="Run ALL analysis categories (quality, security, performance, OOP, architecture, type-check, etc.)",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "Examples:\n"
+            "  heimdall scan ./src\n"
+            "  heimdall scan ./src --format markdown\n"
+            "  heimdall scan ./src --include-tests\n"
+            "  heimdall scan ./src --type-check-mode strict\n"
+            "\n"
+            "This runs all Heimdall analyses in sequence:\n"
+            "  1. File length analysis\n"
+            "  2. Complexity analysis\n"
+            "  3. Lazy import detection\n"
+            "  4. Environment variable fallback detection\n"
+            "  5. Static type checking (Pyright/Pylance)\n"
+            "  6. Security vulnerability scan\n"
+            "  7. Performance pattern analysis\n"
+            "  8. OOP metrics (coupling/cohesion)\n"
+            "  9. Architecture analysis (SOLID/layers)\n"
+            "  10. Dependency analysis (circular imports)\n"
+        ),
+    )
+    scan_parser.add_argument(
+        "path",
+        type=str,
+        nargs="?",
+        default=".",
+        help="Root path to scan (default: current directory)",
+    )
+    scan_parser.add_argument(
+        "--format",
+        "-f",
+        choices=["text", "json", "markdown"],
+        default="text",
+        help="Output format (default: text)",
+    )
+    scan_parser.add_argument(
+        "--threshold",
+        "-t",
+        type=int,
+        default=300,
+        help="File length threshold (default: 300)",
+    )
+    scan_parser.add_argument(
+        "--include-tests",
+        action="store_true",
+        help="Include test files in analysis",
+    )
+    scan_parser.add_argument(
+        "--exclude",
+        "-x",
+        type=str,
+        nargs="+",
+        default=[],
+        help="Glob patterns for paths to exclude",
+    )
+    scan_parser.add_argument(
+        "--type-check-mode",
+        choices=["off", "basic", "standard", "strict", "all"],
+        default="basic",
+        help="Pyright type checking mode (default: basic)",
+    )
 
     return parser
 
@@ -390,6 +459,46 @@ def _setup_quality_commands(subparsers) -> None:
         ),
     )
     add_typing_args(quality_typing)
+
+    # Quality type-check (Pyright/Pylance static type checking)
+    quality_type_check = quality_subparsers.add_parser(
+        "type-check",
+        help="Run static type checking using Pyright (Pylance engine) across the entire codebase",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "Examples:\n"
+            "  heimdall quality type-check ./src\n"
+            "  heimdall quality type-check ./src --mode strict\n"
+            "  heimdall quality type-check ./src --errors-only\n"
+            "  heimdall quality type-check ./src --category missing_import\n"
+            "  heimdall quality type-check ./src --venv-path .venv --format json\n"
+            "\n"
+            "Type checking modes (Pylance equivalent):\n"
+            "  off         No type checking\n"
+            "  basic       Basic checks (Pylance default)\n"
+            "  standard    Standard checks (more thorough)\n"
+            "  strict      All checks enabled (strictest)\n"
+            "  all         All checks + all optional rules\n"
+            "\n"
+            "Diagnostic categories:\n"
+            "  type_mismatch       Type compatibility errors\n"
+            "  missing_import      Unresolved imports\n"
+            "  undefined_variable  Undefined names\n"
+            "  argument_error      Wrong argument types/counts\n"
+            "  return_type         Return type mismatches\n"
+            "  attribute_error     Invalid attribute access\n"
+            "  assignment_error    Incompatible assignments\n"
+            "  operator_error      Invalid operator usage\n"
+            "  override_error      Incorrect method overrides\n"
+            "  generic_error       Generic type violations\n"
+            "  protocol_error      Protocol conformance issues\n"
+            "  typed_dict_error    TypedDict violations\n"
+            "  overload_error      Overload resolution issues\n"
+            "  unreachable_code    Unreachable code (type-based)\n"
+            "  deprecated          Deprecated API usage\n"
+        ),
+    )
+    add_type_check_args(quality_type_check)
 
     # Quality thread-safety
     quality_thread_safety = quality_subparsers.add_parser(
@@ -742,6 +851,7 @@ def _setup_arch_commands(subparsers) -> None:
         ("solid", "Validate adherence to SOLID principles and report violations"),
         ("layers", "Check that modules respect defined architectural layer boundaries"),
         ("patterns", "Detect implemented design patterns and flag antipatterns"),
+        ("hexagonal", "Analyze hexagonal (ports and adapters) architecture compliance"),
     ]:
         sub = arch_subparsers.add_parser(cmd, help=desc)
         add_arch_args(sub)
@@ -1291,6 +1401,7 @@ def main(args=None):
             print("  forbidden-imports  Detect use of libraries that should use wrappers")
             print("  datetime        Detect unsafe datetime usage (utcnow, naive now, today)")
             print("  typing          Report functions and methods missing type annotations")
+            print("  type-check      Run Pyright/Pylance static type checking across the codebase")
             print("  thread-safety   Detect uninitialized attrs and shared mutable collections")
             print("  race-conditions Detect race condition patterns (start-before-store, etc.)")
             print("  daemon-threads  Detect daemon thread lifecycle issues (no join, local-only, etc.)")
@@ -1320,6 +1431,7 @@ def main(args=None):
             "forbidden-imports": lambda: run_forbidden_imports_analysis(args, verbose),
             "datetime": lambda: run_datetime_analysis(args, verbose),
             "typing": lambda: run_typing_analysis(args, verbose),
+            "type-check": lambda: run_type_check_analysis(args, verbose),
             "thread-safety": lambda: run_thread_safety_analysis(args, verbose),
             "race-conditions": lambda: run_race_conditions_analysis(args, verbose),
             "daemon-threads": lambda: run_daemon_threads_analysis(args, verbose),
@@ -1459,7 +1571,7 @@ def main(args=None):
             print("\nUse 'heimdall architecture <subcommand> -h' for help on a specific subcommand.")
             sys.exit(1)
 
-        arch_types = {"analyze": "all", "solid": "solid", "layers": "layers", "patterns": "patterns"}
+        arch_types = {"analyze": "all", "solid": "solid", "layers": "layers", "patterns": "patterns", "hexagonal": "hexagonal"}
 
         if args.arch_command in arch_types:
             sys.exit(run_arch_analysis(args, verbose, arch_types[args.arch_command]))
@@ -1631,6 +1743,10 @@ def main(args=None):
     # Handle dashboard command
     elif args.command == "dashboard":
         sys.exit(run_dashboard(args, verbose))
+
+    # Handle scan command (runs ALL analyses)
+    elif args.command == "scan":
+        sys.exit(run_full_scan(args, verbose))
 
     else:
         print(f"Unknown command: {args.command}")
