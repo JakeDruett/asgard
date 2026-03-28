@@ -1,31 +1,25 @@
 """
 Asgard Dashboard HTML Renderer
 
-Generates all HTML pages for the web dashboard using Python f-strings only.
-No external templating library is used.
+Generates HTML pages for the web dashboard using Python f-strings only.
 """
 
 from pathlib import Path
-from typing import List
 
-from Asgard.Dashboard.models.dashboard_models import DashboardState, IssueSummaryData, RatingData
+from Asgard.Dashboard.models.dashboard_models import DashboardState
 from Asgard.Dashboard.services._html_helpers import (
     gate_badge,
     rating_badge,
-    rating_to_score,
-    severity_badge,
-    status_badge,
-    truncate_path,
+)
+from Asgard.Dashboard.services._html_renderer_pages import (
+    render_history_content,
+    render_issues_content,
 )
 from Asgard.Dashboard.services._html_templates import EMBEDDED_CSS
 
 
 class HtmlRenderer:
-    """
-    Generates HTML pages for the Asgard web dashboard.
-
-    All rendering is done with Python f-strings. No external templating library is used.
-    """
+    """Generates HTML pages for the Asgard web dashboard."""
 
     def render_page(
         self,
@@ -34,18 +28,7 @@ class HtmlRenderer:
         active_page: str,
         project_path: str,
     ) -> str:
-        """
-        Wrap content in a full HTML document with sidebar navigation and embedded CSS.
-
-        Args:
-            title: Page title shown in the browser tab.
-            content: HTML fragment for the main content area.
-            active_page: One of 'overview', 'issues', 'history'.
-            project_path: Project path displayed in the sidebar.
-
-        Returns:
-            Complete HTML document as a string.
-        """
+        """Wrap content in a full HTML document with sidebar navigation."""
         project_label = Path(project_path).name or project_path
 
         def nav_link(href: str, label: str, page_key: str) -> str:
@@ -98,15 +81,7 @@ class HtmlRenderer:
 </html>"""
 
     def render_overview(self, state: DashboardState) -> str:
-        """
-        Render the overview page with quality gate, ratings, and issue summary cards.
-
-        Args:
-            state: DashboardState populated by DataCollector.
-
-        Returns:
-            Complete HTML document string.
-        """
+        """Render the overview page with quality gate, ratings, and issue summary."""
         gate_status = state.quality_gate_status or "unknown"
         gate_html = gate_badge(gate_status)
 
@@ -190,233 +165,17 @@ class HtmlRenderer:
         status_filter: str,
         severity_filter: str,
     ) -> str:
-        """
-        Render the issues page with filter bar and paginated issues table.
-
-        Args:
-            state: DashboardState populated by DataCollector.
-            status_filter: Active status filter value ('all' or a specific status string).
-            severity_filter: Active severity filter value ('all' or a specific severity string).
-
-        Returns:
-            Complete HTML document string.
-        """
-        issues = state.recent_issues
-
-        if status_filter and status_filter != "all":
-            issues = [i for i in issues if str(i.get("status", "")).lower() == status_filter.lower()]
-
-        if severity_filter and severity_filter != "all":
-            issues = [i for i in issues if str(i.get("severity", "")).lower() == severity_filter.lower()]
-
-        total_count = len(issues)
-        page_issues = issues[:50]
-
-        status_options = [
-            ("all", "All Statuses"),
-            ("open", "Open"),
-            ("confirmed", "Confirmed"),
-            ("resolved", "Resolved"),
-            ("false_positive", "False Positive"),
-            ("wont_fix", "Wont Fix"),
-        ]
-        severity_options = [
-            ("all", "All Severities"),
-            ("critical", "Critical"),
-            ("high", "High"),
-            ("medium", "Medium"),
-            ("low", "Low"),
-            ("info", "Info"),
-        ]
-
-        def build_options(options: list, current: str) -> str:
-            parts = []
-            for val, label in options:
-                selected = ' selected' if val == current else ''
-                parts.append(f'<option value="{val}"{selected}>{label}</option>')
-            return "".join(parts)
-
-        status_opts_html = build_options(status_options, status_filter or "all")
-        severity_opts_html = build_options(severity_options, severity_filter or "all")
-
-        filter_bar = f"""
-<form method="get" action="/issues" class="filter-bar filter-form">
-  <label for="status-filter">Status:</label>
-  <select name="status" id="status-filter">
-    {status_opts_html}
-  </select>
-  <label for="severity-filter">Severity:</label>
-  <select name="severity" id="severity-filter">
-    {severity_opts_html}
-  </select>
-  <button type="submit">Filter</button>
-</form>"""
-
-        pagination_html = ""
-        if total_count > 50:
-            pagination_html = f'<div class="pagination-info">Showing 1-50 of {total_count}</div>'
-        elif total_count == 0:
-            pagination_html = '<div class="pagination-info">No issues match the current filters.</div>'
-        else:
-            pagination_html = f'<div class="pagination-info">Showing {total_count} issue{"s" if total_count != 1 else ""}</div>'
-
-        rows_html = ""
-        for issue in page_issues:
-            severity_str = str(issue.get("severity", ""))
-            status_str = str(issue.get("status", ""))
-            file_path = str(issue.get("file_path", ""))
-            line_number = issue.get("line_number", "")
-            first_detected = issue.get("first_detected", "")
-            if first_detected and "T" in str(first_detected):
-                first_detected = str(first_detected).split("T")[0]
-
-            rows_html += f"""<tr>
-  <td>{severity_badge(severity_str)}</td>
-  <td>{issue.get("issue_type", "")}</td>
-  <td title="{file_path}">{truncate_path(file_path)}</td>
-  <td>{line_number}</td>
-  <td>{issue.get("rule_id", "")}</td>
-  <td>{status_badge(status_str)}</td>
-  <td class="ts">{first_detected}</td>
-  <td>{issue.get("assigned_to", "") or ""}</td>
-</tr>"""
-
-        table_html = f"""
-<div class="table-wrap">
-  <table>
-    <thead>
-      <tr>
-        <th>Severity</th>
-        <th>Type</th>
-        <th>File</th>
-        <th>Line</th>
-        <th>Rule</th>
-        <th>Status</th>
-        <th>First Detected</th>
-        <th>Assigned To</th>
-      </tr>
-    </thead>
-    <tbody>
-      {rows_html if rows_html else '<tr><td colspan="8" style="text-align:center;color:#718096;padding:20px;">No issues found.</td></tr>'}
-    </tbody>
-  </table>
-</div>"""
-
-        content = f"""
-<h2 class="page-title">Issues</h2>
-{filter_bar}
-{pagination_html}
-{table_html}
-"""
+        """Render the issues page with filter bar and paginated issues table."""
+        content = render_issues_content(state, status_filter, severity_filter)
         return self.render_page("Issues", content, "issues", state.project_path)
 
     def render_history(self, state: DashboardState) -> str:
-        """
-        Render the history page with snapshot table and a CSS quality score bar chart.
-
-        Args:
-            state: DashboardState populated by DataCollector.
-
-        Returns:
-            Complete HTML document string.
-        """
-        snapshots = state.snapshots
-
-        rows_html = ""
-        for snap in snapshots:
-            ts = snap.get("scan_timestamp", "")
-            if ts and "T" in str(ts):
-                ts_display = str(ts).replace("T", " ").split(".")[0]
-            else:
-                ts_display = str(ts) if ts else ""
-
-            commit = snap.get("git_commit", "") or ""
-            commit_short = commit[:8] if commit else ""
-            gate_status = snap.get("quality_gate_status", "") or ""
-            ratings = snap.get("ratings") or {}
-
-            maint = ratings.get("maintainability", "?")
-            reli = ratings.get("reliability", "?")
-            sec = ratings.get("security", "?")
-            overall = ratings.get("overall", "?")
-            score = rating_to_score(overall)
-
-            rows_html += f"""<tr>
-  <td class="ts">{ts_display}</td>
-  <td><code>{commit_short}</code></td>
-  <td>{gate_badge(gate_status) if gate_status else ""}</td>
-  <td>{rating_badge(maint)}</td>
-  <td>{rating_badge(reli)}</td>
-  <td>{rating_badge(sec)}</td>
-  <td><strong>{score}</strong></td>
-</tr>"""
-
-        table_html = f"""
-<div class="table-wrap">
-  <table>
-    <thead>
-      <tr>
-        <th>Date</th>
-        <th>Commit</th>
-        <th>Gate</th>
-        <th>Maintainability</th>
-        <th>Reliability</th>
-        <th>Security</th>
-        <th>Quality Score</th>
-      </tr>
-    </thead>
-    <tbody>
-      {rows_html if rows_html else '<tr><td colspan="7" style="text-align:center;color:#718096;padding:20px;">No snapshots recorded yet.</td></tr>'}
-    </tbody>
-  </table>
-</div>"""
-
-        chart_snapshots = snapshots[:10]
-        chart_items: List[str] = []
-        max_score = 100
-
-        for snap in reversed(chart_snapshots):
-            ts = snap.get("scan_timestamp", "")
-            ts_label = str(ts).split("T")[0] if ts and "T" in str(ts) else str(ts)[:10]
-            ratings = snap.get("ratings") or {}
-            overall = ratings.get("overall", "?")
-            score = rating_to_score(overall)
-            bar_pct = int((score / max_score) * 100)
-
-            chart_items.append(f"""<div class="bar-row">
-  <div class="bar-label">{ts_label}</div>
-  <div class="bar-outer">
-    <div class="bar-inner" style="width:{bar_pct}%;"></div>
-  </div>
-  <div class="bar-value">{score}</div>
-</div>""")
-
-        chart_html = ""
-        if chart_items:
-            chart_html = f"""
-<div class="bar-chart">
-  <div class="bar-chart-title">Quality Score Trend (last {len(chart_items)} runs, A=100 to E=20)</div>
-  {"".join(chart_items)}
-</div>"""
-
-        content = f"""
-<h2 class="page-title">History</h2>
-{chart_html}
-<div class="section-title">Analysis Snapshots</div>
-{table_html}
-"""
+        """Render the history page with snapshot table and quality score chart."""
+        content = render_history_content(state)
         return self.render_page("History", content, "history", state.project_path)
 
     def render_error(self, message: str) -> str:
-        """
-        Render a simple error page.
-
-        Args:
-            message: Error message to display.
-
-        Returns:
-            Complete HTML document string.
-        """
+        """Render a simple error page."""
         return f"""<!DOCTYPE html>
 <html lang="en">
 <head>

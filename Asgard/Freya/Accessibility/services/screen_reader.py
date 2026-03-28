@@ -23,10 +23,12 @@ from Asgard.Freya.Accessibility.services._screen_reader_checks import (
     analyze_headings,
     check_images,
     check_forms,
+    get_selector,
+)
+from Asgard.Freya.Accessibility.services._screen_reader_checks_part2 import (
     check_links,
     check_buttons,
     get_accessible_name,
-    get_selector,
 )
 
 

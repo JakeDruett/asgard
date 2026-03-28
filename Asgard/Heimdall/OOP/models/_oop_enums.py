@@ -45,7 +45,7 @@ class OOPConfig:
     cbo_threshold: int = 10
     dit_threshold: int = 5
     noc_threshold: int = 10
-    lcom_threshold: float = 0.8
+    lcom_threshold: float = 0.85
     rfc_threshold: int = 50
     wmc_threshold: int = 50
 

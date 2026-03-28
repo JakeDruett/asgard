@@ -18,14 +18,16 @@ from Asgard.Volundr.Validation.models.validation_models import (
     ValidationContext,
     ValidationSeverity,
 )
-from Asgard.Volundr.Validation.services.terraform_validator_helpers import (
-    build_report,
-    check_deprecated_syntax,
-    check_hardcoded_credentials,
-    extract_block,
+from Asgard.Volundr.Validation.services._terraform_aws_validators import (
     validate_aws_iam_policy,
     validate_aws_s3_bucket,
     validate_aws_security_group,
+)
+from Asgard.Volundr.Validation.services._terraform_validator_report import build_report
+from Asgard.Volundr.Validation.services.terraform_validator_helpers import (
+    check_deprecated_syntax,
+    check_hardcoded_credentials,
+    extract_block,
     validate_module_call,
     validate_module_structure,
     validate_output,

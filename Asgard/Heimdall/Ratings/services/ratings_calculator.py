@@ -1,14 +1,4 @@
-"""
-Heimdall Ratings Calculator Service
-
-Calculates A-E letter ratings across three quality dimensions:
-
-- Maintainability: derived from technical debt ratio (debt hours / total estimated hours)
-- Reliability: derived from the worst severity bug / quality issue found
-- Security: derived from the worst severity vulnerability found
-
-The overall project rating is the worst (lowest) of the three dimension ratings.
-"""
+"""Heimdall Ratings Calculator - calculates A-E letter ratings for maintainability, reliability, and security."""
 
 from datetime import datetime
 from pathlib import Path

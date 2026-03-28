@@ -7,7 +7,6 @@ from Asgard.Volundr.Helm.services._chart_generator_templates import (  # noqa: F
     generate_serviceaccount_template,
 )
 from Asgard.Volundr.Helm.services._chart_generator_extras import (  # noqa: F401
-    calculate_best_practice_score,
     generate_configmap_template,
     generate_helmignore,
     generate_hpa_template,
@@ -17,5 +16,8 @@ from Asgard.Volundr.Helm.services._chart_generator_extras import (  # noqa: F401
     generate_pdb_template,
     generate_secret_template,
     generate_test_template,
+)
+from Asgard.Volundr.Helm.services._chart_generator_extras_part2 import (  # noqa: F401
+    calculate_best_practice_score,
     validate_chart,
 )

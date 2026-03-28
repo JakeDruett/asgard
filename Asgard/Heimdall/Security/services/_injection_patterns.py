@@ -1,8 +1,4 @@
-"""
-Heimdall Injection Detection Patterns
-
-Pattern definitions for SQL, XSS, command injection, and path traversal detection.
-"""
+"""Heimdall Injection Detection Patterns for SQL, XSS, command injection, and path traversal."""
 
 import re
 from typing import List, Optional, Set

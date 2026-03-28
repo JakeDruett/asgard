@@ -1,10 +1,4 @@
-"""
-Linter Initializer Service
-
-Detects project type and generates appropriate linting configuration files
-based on GAIA coding standards. Also generates VSCode editor settings and
-checks for required tool/extension availability.
-"""
+"""Linter Initializer Service - detects project type and generates linting configuration files."""
 
 import json
 from pathlib import Path
@@ -49,11 +43,7 @@ class LinterInitializer:
         self.force = force
 
     def detect_project_type(self) -> tuple[bool, bool]:
-        """Detect whether the project is Python, TypeScript/JS, or both.
-
-        Returns:
-            Tuple of (is_python, is_typescript).
-        """
+        """Detect whether the project is Python, TypeScript/JS, or both."""
         is_python = False
         is_typescript = False
 
@@ -87,16 +77,7 @@ class LinterInitializer:
         return section_marker in content
 
     def _write_file(self, filename: str, content: str, mode: str) -> tuple[str, str]:
-        """Write a config file.
-
-        Args:
-            filename: Target filename.
-            content: File content with {project_name} placeholders.
-            mode: "create" for new files, "append" to append to existing.
-
-        Returns:
-            Tuple of (filename, status) where status is "created", "appended", "skipped", or "exists".
-        """
+        """Write a config file, returning (filename, status)."""
         filepath = self.project_path / filename
         rendered = content.replace("{project_name}", self.project_name)
 
@@ -127,16 +108,7 @@ class LinterInitializer:
             return filename, "created"
 
     def _write_json_file(self, filename: str, data: dict, merge: bool = True) -> tuple[str, str]:
-        """Write a JSON config file, optionally merging with existing content.
-
-        Args:
-            filename: Target filename relative to project_path.
-            data: Dictionary to write as JSON.
-            merge: If True and file exists, merge new keys into existing JSON.
-
-        Returns:
-            Tuple of (filename, status).
-        """
+        """Write a JSON config file, optionally merging with existing content."""
         filepath = self.project_path / filename
         filepath.parent.mkdir(parents=True, exist_ok=True)
 
@@ -158,11 +130,7 @@ class LinterInitializer:
         return filename, "created"
 
     def init_python(self) -> list[tuple[str, str]]:
-        """Generate Python linting configs (ruff, mypy, pre-commit).
-
-        Returns:
-            List of (filename, status) tuples.
-        """
+        """Generate Python linting configs (ruff, mypy, pre-commit)."""
         results = []
         has_pyproject = (self.project_path / "pyproject.toml").exists()
 
@@ -186,11 +154,7 @@ class LinterInitializer:
         return results
 
     def init_typescript(self) -> list[tuple[str, str]]:
-        """Generate TypeScript/JS linting configs (eslint, tsconfig, prettier).
-
-        Returns:
-            List of (filename, status) tuples.
-        """
+        """Generate TypeScript/JS linting configs (eslint, tsconfig, prettier)."""
         results = []
 
         for _name, template in TYPESCRIPT_TEMPLATES.items():
@@ -204,15 +168,7 @@ class LinterInitializer:
         return results
 
     def init_vscode(self, is_python: bool, is_typescript: bool) -> list[tuple[str, str]]:
-        """Generate .vscode/settings.json and .vscode/extensions.json.
-
-        Args:
-            is_python: Whether to include Python editor settings.
-            is_typescript: Whether to include TypeScript editor settings.
-
-        Returns:
-            List of (filename, status) tuples.
-        """
+        """Generate .vscode/settings.json and .vscode/extensions.json."""
         results = []
 
         settings: dict = {}
@@ -237,15 +193,7 @@ class LinterInitializer:
         return results
 
     def check_tools(self, is_python: bool, is_typescript: bool) -> list[dict]:
-        """Check which required CLI tools and packages are missing.
-
-        Args:
-            is_python: Whether to check Python tools.
-            is_typescript: Whether to check TypeScript tools.
-
-        Returns:
-            List of dicts with keys: name, installed (bool), install, purpose.
-        """
+        """Check which required CLI tools and packages are missing."""
         return _check_tools(
             self.project_path,
             is_python,
@@ -256,15 +204,7 @@ class LinterInitializer:
         )
 
     def check_vscode_extensions(self, is_python: bool, is_typescript: bool) -> list[dict]:
-        """Check which recommended VSCode extensions are installed.
-
-        Args:
-            is_python: Whether to check Python extensions.
-            is_typescript: Whether to check TypeScript extensions.
-
-        Returns:
-            List of dicts with keys: extension_id, installed (bool), name.
-        """
+        """Check which recommended VSCode extensions are installed."""
         return _check_vscode_extensions(
             is_python,
             is_typescript,
@@ -273,15 +213,7 @@ class LinterInitializer:
         )
 
     def init_all(self, project_type: Optional[str] = None) -> list[tuple[str, str]]:
-        """Initialize linting configs based on detected or specified project type.
-
-        Args:
-            project_type: Force a specific type: "python", "typescript", or "both".
-                         If None, auto-detects from project contents.
-
-        Returns:
-            List of (filename, status) tuples.
-        """
+        """Initialize linting configs based on detected or specified project type."""
         results = []
 
         if project_type == "python":

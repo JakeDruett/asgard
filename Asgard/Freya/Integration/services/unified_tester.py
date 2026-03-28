@@ -16,11 +16,13 @@ from Asgard.Freya.Integration.models.integration_models import (
     UnifiedTestResult,
     UnifiedTestReport,
 )
+from Asgard.Freya.Integration.services._unified_tester_responsive import (
+    run_responsive_tests,
+)
 from Asgard.Freya.Integration.services._unified_tester_runners import (
     map_severity,
     run_accessibility_tests,
     run_visual_tests,
-    run_responsive_tests,
 )
 
 

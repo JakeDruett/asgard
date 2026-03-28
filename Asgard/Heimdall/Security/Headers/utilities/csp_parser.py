@@ -1,8 +1,4 @@
-"""
-Heimdall Security Headers CSP Parser Utilities
-
-Helper functions for parsing and analyzing Content-Security-Policy headers.
-"""
+"""Heimdall Security Headers CSP Parser Utilities."""
 
 import re
 from typing import Dict, List, Optional, Set, Tuple
@@ -150,28 +146,12 @@ class ParsedCSP:
 
 
 def parse_csp(csp_string: str) -> ParsedCSP:
-    """
-    Parse a Content-Security-Policy string.
-
-    Args:
-        csp_string: The CSP header value
-
-    Returns:
-        ParsedCSP object with parsed directives
-    """
+    """Parse a Content-Security-Policy string."""
     return ParsedCSP(csp_string)
 
 
 def extract_csp_from_code(content: str) -> List[Tuple[int, str]]:
-    """
-    Extract CSP definitions from source code.
-
-    Args:
-        content: Source code content
-
-    Returns:
-        List of (line_number, csp_value) tuples
-    """
+    """Extract CSP definitions from source code."""
     results = []
     lines = content.split("\n")
 
@@ -200,16 +180,7 @@ def extract_csp_from_code(content: str) -> List[Tuple[int, str]]:
 
 
 def validate_csp_directive_value(directive: str, value: str) -> List[str]:
-    """
-    Validate a CSP directive value and return any issues.
-
-    Args:
-        directive: The directive name
-        value: The directive value
-
-    Returns:
-        List of issue descriptions
-    """
+    """Validate a CSP directive value and return any issues."""
     issues = []
     value_lower = value.lower()
 
@@ -233,15 +204,7 @@ def validate_csp_directive_value(directive: str, value: str) -> List[str]:
 
 
 def get_csp_security_level(csp: ParsedCSP) -> str:
-    """
-    Assess the overall security level of a CSP.
-
-    Args:
-        csp: Parsed CSP object
-
-    Returns:
-        Security level: "strict", "moderate", "weak", or "none"
-    """
+    """Assess the overall security level of a CSP."""
     if not csp.directives:
         return "none"
 
@@ -262,15 +225,7 @@ def get_csp_security_level(csp: ParsedCSP) -> str:
 
 
 def suggest_csp_improvements(csp: ParsedCSP) -> List[str]:
-    """
-    Suggest improvements for a CSP.
-
-    Args:
-        csp: Parsed CSP object
-
-    Returns:
-        List of improvement suggestions
-    """
+    """Suggest improvements for a CSP."""
     suggestions = []
 
     if not csp.has_directive("default-src"):

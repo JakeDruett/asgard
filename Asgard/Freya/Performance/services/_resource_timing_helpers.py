@@ -1,8 +1,4 @@
-"""
-Freya Resource Timing Analyzer helper functions.
-
-Helper functions extracted from resource_timing_analyzer.py.
-"""
+"""Freya Resource Timing Analyzer helper functions."""
 
 from typing import List
 
@@ -274,44 +270,18 @@ def get_optimization_suggestions(report: ResourceTimingReport) -> List[str]:
     suggestions = []
 
     if report.total_size_kb > 1000:
-        suggestions.append(
-            "Enable gzip/brotli compression on your server to reduce transfer sizes"
-        )
-
+        suggestions.append("Enable gzip/brotli compression on your server to reduce transfer sizes")
     if report.image_size > 500 * 1024:
-        suggestions.append(
-            "Optimize images: consider WebP format, resize to display size, "
-            "use responsive images"
-        )
-
+        suggestions.append("Optimize images: consider WebP format, resize to display size, use responsive images")
     if report.script_size > 500 * 1024:
-        suggestions.append(
-            "Reduce JavaScript bundle size: code splitting, tree shaking, "
-            "lazy loading modules"
-        )
-
+        suggestions.append("Reduce JavaScript bundle size: code splitting, tree shaking, lazy loading modules")
     if report.font_count > 3:
-        suggestions.append(
-            "Reduce font variants: limit font weights and styles, "
-            "use font-display: swap"
-        )
-
+        suggestions.append("Reduce font variants: limit font weights and styles, use font-display: swap")
     if report.uncached_count > 10:
-        suggestions.append(
-            "Configure cache headers for static assets "
-            "(Cache-Control, ETag, Last-Modified)"
-        )
-
+        suggestions.append("Configure cache headers for static assets (Cache-Control, ETag, Last-Modified)")
     if report.render_blocking_count > 3:
-        suggestions.append(
-            "Reduce render-blocking resources: "
-            "inline critical CSS, defer non-critical scripts"
-        )
-
+        suggestions.append("Reduce render-blocking resources: inline critical CSS, defer non-critical scripts")
     if report.total_resources > 50:
-        suggestions.append(
-            "Reduce HTTP requests: bundle files, use image sprites, "
-            "implement HTTP/2 multiplexing"
-        )
+        suggestions.append("Reduce HTTP requests: bundle files, use image sprites, implement HTTP/2 multiplexing")
 
     return suggestions

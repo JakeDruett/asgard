@@ -1,8 +1,4 @@
-"""
-Freya Playwright Utilities
-
-Utility functions for Playwright browser automation.
-"""
+"""Freya Playwright Utilities for browser automation."""
 
 from typing import Any, Dict, List, Literal, Optional, cast
 
@@ -20,30 +16,16 @@ from Asgard.Freya.Integration.services._playwright_presets import (
 
 
 class PlaywrightUtils:
-    """
-    Playwright utility functions.
-
-    Provides helpers for browser automation.
-    """
+    """Playwright utility functions for browser automation."""
 
     def __init__(self, config: Optional[BrowserConfig] = None):
-        """
-        Initialize Playwright utilities.
-
-        Args:
-            config: Browser configuration
-        """
+        """Initialize Playwright utilities."""
         self.config = config or BrowserConfig()
         self._playwright: Optional[Playwright] = None
         self._browser: Optional[Browser] = None
 
     async def launch_browser(self) -> Browser:
-        """
-        Launch a browser instance.
-
-        Returns:
-            Browser instance
-        """
+        """Launch a browser instance."""
         pw: Playwright = await async_playwright().start()
         self._playwright = pw
 
@@ -77,18 +59,7 @@ class PlaywrightUtils:
         record_video: bool = False,
         video_dir: Optional[str] = None
     ) -> BrowserContext:
-        """
-        Create a browser context.
-
-        Args:
-            device: Device preset name
-            network: Network preset name
-            record_video: Whether to record video
-            video_dir: Video output directory
-
-        Returns:
-            Browser context
-        """
+        """Create a browser context with optional device/network presets."""
         if not self._browser:
             await self.launch_browser()
 
@@ -132,16 +103,7 @@ class PlaywrightUtils:
         context: Optional[BrowserContext] = None,
         device: Optional[str] = None
     ) -> Page:
-        """
-        Create a new page.
-
-        Args:
-            context: Existing browser context
-            device: Device preset name
-
-        Returns:
-            Page instance
-        """
+        """Create a new page in the given or new context."""
         if context is None:
             context = await self.create_context(device=device)
 
@@ -156,24 +118,11 @@ class PlaywrightUtils:
         url: str,
         wait_until: Literal["commit", "domcontentloaded", "load", "networkidle"] = "networkidle"
     ) -> None:
-        """
-        Navigate to a URL.
-
-        Args:
-            page: Page instance
-            url: URL to navigate to
-            wait_until: Wait condition
-        """
+        """Navigate to a URL and wait for the specified condition."""
         await page.goto(url, wait_until=wait_until, timeout=self.config.timeout)
 
     async def wait_for_network_idle(self, page: Page, timeout: int = 30000) -> None:
-        """
-        Wait for network to be idle.
-
-        Args:
-            page: Page instance
-            timeout: Timeout in milliseconds
-        """
+        """Wait for network to be idle."""
         await page.wait_for_load_state("networkidle", timeout=timeout)
 
     async def take_screenshot(
@@ -183,18 +132,7 @@ class PlaywrightUtils:
         full_page: bool = False,
         element: Optional[str] = None
     ) -> str:
-        """
-        Take a screenshot.
-
-        Args:
-            page: Page instance
-            path: Output path
-            full_page: Capture full page
-            element: Optional element selector
-
-        Returns:
-            Screenshot path
-        """
+        """Take a screenshot of the page or a specific element."""
         if element:
             locator = page.locator(element)
             await locator.screenshot(path=path)
@@ -204,28 +142,11 @@ class PlaywrightUtils:
         return path
 
     async def evaluate(self, page: Page, script: str) -> Any:
-        """
-        Evaluate JavaScript on page.
-
-        Args:
-            page: Page instance
-            script: JavaScript code
-
-        Returns:
-            Evaluation result
-        """
+        """Evaluate JavaScript on page."""
         return await page.evaluate(script)
 
     async def get_page_metrics(self, page: Page) -> Dict:
-        """
-        Get page performance metrics.
-
-        Args:
-            page: Page instance
-
-        Returns:
-            Performance metrics dict
-        """
+        """Get page performance metrics."""
         metrics = await page.evaluate("""
             () => {
                 const timing = performance.timing;
@@ -245,15 +166,7 @@ class PlaywrightUtils:
         return cast(Dict[Any, Any], metrics)
 
     async def get_accessibility_tree(self, page: Page) -> Dict:
-        """
-        Get accessibility tree snapshot.
-
-        Args:
-            page: Page instance
-
-        Returns:
-            Accessibility tree
-        """
+        """Get accessibility tree snapshot."""
         return cast(Dict[Any, Any], await page.accessibility.snapshot())  # type: ignore[attr-defined]
 
     async def emulate_media(
@@ -262,14 +175,7 @@ class PlaywrightUtils:
         color_scheme: Optional[str] = None,
         reduced_motion: Optional[str] = None
     ) -> None:
-        """
-        Emulate media features.
-
-        Args:
-            page: Page instance
-            color_scheme: 'light', 'dark', or 'no-preference'
-            reduced_motion: 'reduce' or 'no-preference'
-        """
+        """Emulate media features like color scheme and reduced motion."""
         media_features = []
 
         if color_scheme:
@@ -285,14 +191,7 @@ class PlaywrightUtils:
             )
 
     async def set_viewport(self, page: Page, width: int, height: int) -> None:
-        """
-        Set viewport size.
-
-        Args:
-            page: Page instance
-            width: Viewport width
-            height: Viewport height
-        """
+        """Set viewport size."""
         await page.set_viewport_size({"width": width, "height": height})
 
     async def _apply_network_conditions(self, context: BrowserContext, conditions: Dict) -> None:

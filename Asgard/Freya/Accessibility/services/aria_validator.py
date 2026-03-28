@@ -26,12 +26,14 @@ from Asgard.Freya.Accessibility.services._aria_validator_checks import (
     validate_aria_attributes,
     validate_parent_roles,
     validate_required_attributes,
-    validate_hidden_focusable,
-    validate_aria_ids,
-    count_aria_elements,
     get_selector,
     get_element_html,
     build_selector,
+)
+from Asgard.Freya.Accessibility.services._aria_validator_checks_part2 import (
+    validate_hidden_focusable,
+    validate_aria_ids,
+    count_aria_elements,
 )
 
 

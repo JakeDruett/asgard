@@ -23,6 +23,8 @@ from Asgard.Freya.Images.models.image_models import (
 )
 from Asgard.Freya.Images.services._image_scanner_checks import (
     build_image_info,
+)
+from Asgard.Freya.Images.services._image_scanner_checks_part2 import (
     check_image,
 )
 from Asgard.Freya.Images.services._image_scanner_report import build_report

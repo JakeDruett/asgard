@@ -1,9 +1,4 @@
-"""
-Heimdall Cache Analyzer Service
-
-Service for static analysis of caching patterns and opportunities
-in source code.
-"""
+"""Heimdall Cache Analyzer Service - static analysis of caching patterns in source code."""
 
 import re
 import time

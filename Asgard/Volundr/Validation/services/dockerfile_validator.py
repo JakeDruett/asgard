@@ -18,8 +18,8 @@ from Asgard.Volundr.Validation.models.validation_models import (
     ValidationResult,
     ValidationSeverity,
 )
+from Asgard.Volundr.Validation.services._dockerfile_validator_report import build_report
 from Asgard.Volundr.Validation.services.dockerfile_validator_helpers import (
-    build_report,
     check_run_consolidation,
     validate_instruction,
 )

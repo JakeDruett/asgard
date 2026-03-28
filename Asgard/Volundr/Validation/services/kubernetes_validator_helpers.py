@@ -257,17 +257,10 @@ def build_report(
     context: ValidationContext,
 ) -> ValidationReport:
     duration_ms = int((time.time() - start_time) * 1000)
-
     error_count = sum(1 for r in results if r.severity == ValidationSeverity.ERROR)
     warning_count = sum(1 for r in results if r.severity == ValidationSeverity.WARNING)
     info_count = sum(1 for r in results if r.severity == ValidationSeverity.INFO)
-
-    score = 100.0
-    score -= error_count * 10
-    score -= warning_count * 3
-    score -= info_count * 1
-    score = max(0.0, score)
-
+    score = max(0.0, 100.0 - error_count * 10 - warning_count * 3 - info_count * 1)
     file_summaries = []
     results_by_file: Dict[str, List[ValidationResult]] = {}
     for result in results:
@@ -275,7 +268,6 @@ def build_report(
         if fp not in results_by_file:
             results_by_file[fp] = []
         results_by_file[fp].append(result)
-
     for fp in files:
         file_results = results_by_file.get(fp, [])
         file_errors = sum(1 for r in file_results if r.severity == ValidationSeverity.ERROR)
@@ -288,9 +280,7 @@ def build_report(
             info_count=file_info,
             passed=file_errors == 0,
         ))
-
     report_id = hashlib.sha256(str(results).encode()).hexdigest()[:16]
-
     return ValidationReport(
         id=f"k8s-validation-{report_id}",
         title="Kubernetes Manifest Validation",

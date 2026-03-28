@@ -1,8 +1,4 @@
-"""
-Burn Rate Analyzer Service
-
-Analyzes error budget burn rate for alerting and forecasting.
-"""
+"""Burn Rate Analyzer Service - analyzes error budget burn rate for alerting and forecasting."""
 
 from datetime import datetime, timedelta
 from typing import List, Optional, Sequence, Tuple, cast
@@ -52,13 +48,7 @@ class BurnRateAnalyzer:
         critical_threshold: float = 14.4,
         warning_threshold: float = 6.0,
     ):
-        """
-        Initialize the burn rate analyzer.
-
-        Args:
-            critical_threshold: Burn rate threshold for critical alerts
-            warning_threshold: Burn rate threshold for warning alerts
-        """
+        """Initialize the burn rate analyzer."""
         self.critical_threshold = critical_threshold
         self.warning_threshold = warning_threshold
 
@@ -69,18 +59,7 @@ class BurnRateAnalyzer:
         window_hours: float = 1.0,
         current_time: Optional[datetime] = None,
     ) -> BurnRate:
-        """
-        Analyze burn rate for a single time window.
-
-        Args:
-            slo: The SLO definition
-            metrics: SLI metrics
-            window_hours: Analysis window in hours
-            current_time: Current time for calculations
-
-        Returns:
-            BurnRate analysis result
-        """
+        """Analyze burn rate for a single time window."""
         current_time = current_time or datetime.now()
         window_start = current_time - timedelta(hours=window_hours)
 
@@ -146,22 +125,7 @@ class BurnRateAnalyzer:
         long_window_hours: float = 6.0,
         current_time: Optional[datetime] = None,
     ) -> BurnRate:
-        """
-        Perform multi-window burn rate analysis.
-
-        Multi-window alerting reduces false positives by requiring both
-        short and long window thresholds to be exceeded.
-
-        Args:
-            slo: The SLO definition
-            metrics: SLI metrics
-            short_window_hours: Short analysis window
-            long_window_hours: Long analysis window
-            current_time: Current time for calculations
-
-        Returns:
-            BurnRate with both short and long window rates
-        """
+        """Perform multi-window burn rate analysis to reduce false positive alerts."""
         current_time = current_time or datetime.now()
 
         short_result = self.analyze(slo, metrics, short_window_hours, current_time)
@@ -213,19 +177,7 @@ class BurnRateAnalyzer:
         history_hours: int = 24,
         step_hours: float = 1.0,
     ) -> List[BurnRate]:
-        """
-        Analyze burn rate over time.
-
-        Args:
-            slo: The SLO definition
-            metrics: SLI metrics
-            window_hours: Size of each analysis window
-            history_hours: How far back to analyze
-            step_hours: Time step between analyses
-
-        Returns:
-            List of BurnRate for each time step
-        """
+        """Analyze burn rate over time, returning a BurnRate for each time step."""
         results = []
         current = datetime.now()
         start = current - timedelta(hours=history_hours)
@@ -243,18 +195,7 @@ class BurnRateAnalyzer:
         burn_rate_history: Sequence[BurnRate],
         min_duration_hours: float = 0.5,
     ) -> List[Tuple[datetime, datetime, str]]:
-        """
-        Detect incidents from burn rate history.
-
-        An incident is a period where burn rate exceeds thresholds.
-
-        Args:
-            burn_rate_history: Historical burn rate analyses
-            min_duration_hours: Minimum incident duration to report
-
-        Returns:
-            List of (start_time, end_time, severity) tuples
-        """
+        """Detect incidents (periods where burn rate exceeds thresholds) from history."""
         incidents = []
         current_incident_start: Optional[datetime] = None
         current_severity: Optional[str] = None
@@ -290,16 +231,7 @@ class BurnRateAnalyzer:
         current_budget: ErrorBudget,
         burn_rate: BurnRate,
     ) -> Optional[datetime]:
-        """
-        Forecast when error budget will be exhausted.
-
-        Args:
-            current_budget: Current error budget status
-            burn_rate: Current burn rate
-
-        Returns:
-            Datetime when budget will be exhausted, or None if safe
-        """
+        """Forecast when error budget will be exhausted, or None if safe."""
         if burn_rate.burn_rate <= 1.0:
             return None
 

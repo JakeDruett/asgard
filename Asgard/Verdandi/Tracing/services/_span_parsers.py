@@ -1,8 +1,4 @@
-"""
-Span parsing helpers for TraceParser.
-
-Contains private methods for parsing spans from OTLP, Jaeger, Zipkin, and generic formats.
-"""
+"""Span parsing helpers for TraceParser (OTLP, Jaeger, Zipkin, and generic formats)."""
 
 from datetime import datetime
 from typing import Any, Dict, List, Optional, cast
@@ -52,14 +48,7 @@ def parse_attribute_value(value: Dict[str, Any]) -> Any:
 
 def parse_span_kind(kind: int) -> str:
     """Convert OTLP span kind integer to string."""
-    kind_map = {
-        0: "UNSPECIFIED",
-        1: "INTERNAL",
-        2: "SERVER",
-        3: "CLIENT",
-        4: "PRODUCER",
-        5: "CONSUMER",
-    }
+    kind_map = {0: "UNSPECIFIED", 1: "INTERNAL", 2: "SERVER", 3: "CLIENT", 4: "PRODUCER", 5: "CONSUMER"}
     return kind_map.get(kind, "INTERNAL")
 
 
@@ -123,16 +112,13 @@ def parse_otlp_span(
 
     if parent_id == "":
         parent_id = None
-
     start_nano = int(span_data.get("startTimeUnixNano", 0))
     end_nano = int(span_data.get("endTimeUnixNano", 0))
     duration_ms = (end_nano - start_nano) / 1e6
-
     status = span_data.get("status", {})
     status_code = status.get("code", "UNSET")
     if isinstance(status_code, int):
         status_code = {0: "UNSET", 1: "OK", 2: "ERROR"}.get(status_code, "UNSET")
-
     attributes = parse_attributes(span_data.get("attributes", []))
 
     events = []

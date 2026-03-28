@@ -34,6 +34,10 @@ from Asgard.Heimdall.Architecture.services._solid_checks import (
     check_isp,
     check_dip,
 )
+from Asgard.Heimdall.Architecture.services._solid_detectors import (
+    is_visitor_class,
+    is_utility_class,
+)
 
 
 class SOLIDValidator:
@@ -106,46 +110,45 @@ class SOLIDValidator:
         file_path: Path,
         source: str
     ) -> List[SOLIDViolation]:
-        """
-        Check Single Responsibility Principle.
+        """Check Single Responsibility Principle."""
+        # Visitor classes have many visit_* methods by design
+        if is_visitor_class(class_node):
+            return []
 
-        A class should have only one reason to change.
-        Indicators of SRP violation:
-        - Too many public methods
-        - Too many responsibilities (method name prefixes)
-        - High number of dependencies
-        """
         violations = []
         methods = get_class_methods(class_node)
         public_methods = get_public_methods(class_node)
 
-        # Check method count
-        if len(methods) > self.config.max_method_count:
+        # Utility/facade classes get 2x the normal thresholds
+        is_util = is_utility_class(class_node.name)
+        method_threshold = self.config.max_method_count * 2 if is_util else self.config.max_method_count
+        public_threshold = self.config.max_public_methods * 2 if is_util else self.config.max_public_methods
+
+        if len(methods) > method_threshold:
             violations.append(SOLIDViolation(
                 principle=SOLIDPrinciple.SRP,
                 class_name=class_node.name,
                 file_path=str(file_path),
                 line_number=class_node.lineno,
-                message=f"Class has {len(methods)} methods (threshold: {self.config.max_method_count})",
+                message=f"Class has {len(methods)} methods (threshold: {method_threshold})",
                 severity=ViolationSeverity.MODERATE,
                 suggestion="Consider splitting this class into smaller, focused classes",
             ))
 
-        # Check public method count
-        if len(public_methods) > self.config.max_public_methods:
+        if len(public_methods) > public_threshold:
             violations.append(SOLIDViolation(
                 principle=SOLIDPrinciple.SRP,
                 class_name=class_node.name,
                 file_path=str(file_path),
                 line_number=class_node.lineno,
-                message=f"Class has {len(public_methods)} public methods (threshold: {self.config.max_public_methods})",
+                message=f"Class has {len(public_methods)} public methods (threshold: {public_threshold})",
                 severity=ViolationSeverity.LOW,
                 suggestion="Consider reducing the public interface",
             ))
 
-        # Check for multiple responsibilities via method name prefixes
-        prefixes = self._extract_method_prefixes(methods)
-        if len(prefixes) > self.config.max_class_responsibilities:
+        prefixes = self._extract_method_prefixes(methods)  # type: ignore[arg-type]
+        responsibility_threshold = self.config.max_class_responsibilities + 2 if is_util else self.config.max_class_responsibilities
+        if len(prefixes) > responsibility_threshold:
             violations.append(SOLIDViolation(
                 principle=SOLIDPrinciple.SRP,
                 class_name=class_node.name,

@@ -13,19 +13,21 @@ from Asgard.Volundr.Scaffold.services._microservice_python_templates import (  #
     python_test_health,
 )
 from Asgard.Volundr.Scaffold.services._microservice_ts_go_templates import (  # noqa: F401
-    generate_go_service,
     generate_typescript_service,
-    go_config,
-    go_dockerfile,
-    go_health_handler,
-    go_main,
-    go_mod,
     typescript_config,
     typescript_dockerfile,
     typescript_health_route,
     typescript_index,
     typescript_package_json,
     typescript_tsconfig,
+)
+from Asgard.Volundr.Scaffold.services._microservice_ts_go_templates_part2 import (  # noqa: F401
+    generate_go_service,
+    go_config,
+    go_dockerfile,
+    go_health_handler,
+    go_main,
+    go_mod,
 )
 from Asgard.Volundr.Scaffold.services._microservice_common_templates import (  # noqa: F401
     common_docker_compose,

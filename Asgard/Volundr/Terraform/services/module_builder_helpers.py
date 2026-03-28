@@ -2,10 +2,12 @@
 
 from Asgard.Volundr.Terraform.services._module_builder_blocks import (  # noqa: F401
     PROVIDER_SOURCES,
-    calculate_best_practice_score,
     generate_data_source_block,
     generate_examples,
     generate_resource_block,
+)
+from Asgard.Volundr.Terraform.services._module_builder_blocks_part2 import (  # noqa: F401
+    calculate_best_practice_score,
     generate_tests,
     validate_module,
 )

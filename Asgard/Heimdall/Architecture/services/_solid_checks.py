@@ -6,12 +6,20 @@ Individual SOLID principle check helpers extracted from SOLIDValidator.
 
 import ast
 from pathlib import Path
-from typing import List, Set
+from typing import List
 
 from Asgard.Heimdall.Architecture.models.architecture_models import (
     SOLIDPrinciple,
     SOLIDViolation,
     ViolationSeverity,
+)
+from Asgard.Heimdall.Architecture.services._solid_detectors import (
+    BENIGN_INSTANTIATIONS,
+    extract_method_prefixes,  # noqa: F401 -- re-exported for solid_validator
+    is_data_model_class,
+    is_format_dispatch,
+    is_inherently_branchy_method,
+    uses_ast_isinstance,
 )
 from Asgard.Heimdall.Architecture.utilities.ast_utils import (
     get_abstract_methods,
@@ -20,62 +28,6 @@ from Asgard.Heimdall.Architecture.utilities.ast_utils import (
     get_constructor_params,
     is_abstract_class,
 )
-
-
-def extract_method_prefixes(methods: List[ast.FunctionDef]) -> Set[str]:
-    """Extract responsibility prefixes from method names."""
-    prefixes: Set[str] = set()
-    responsibility_words = {
-        "get", "set", "is", "has", "can",
-        "validate", "check", "verify",
-        "create", "build", "make", "generate",
-        "parse", "process", "transform", "convert",
-        "save", "load", "read", "write", "store",
-        "send", "receive", "notify", "dispatch",
-        "render", "display", "show", "format",
-        "calculate", "compute", "analyze",
-    }
-
-    for method in methods:
-        name = method.name
-        if name.startswith("_"):
-            continue
-
-        parts = []
-        current: List[str] = []
-        for char in name:
-            if char == "_":
-                if current:
-                    parts.append("".join(current).lower())
-                    current = []
-            elif char.isupper() and current:
-                parts.append("".join(current).lower())
-                current = [char.lower()]
-            else:
-                current.append(char.lower())
-        if current:
-            parts.append("".join(current))
-
-        if parts and parts[0] in responsibility_words:
-            prefix = parts[0]
-            if prefix in {"get", "set", "is", "has", "can"}:
-                continue
-            if prefix in {"validate", "check", "verify"}:
-                prefixes.add("validation")
-            elif prefix in {"create", "build", "make", "generate"}:
-                prefixes.add("creation")
-            elif prefix in {"parse", "process", "transform", "convert"}:
-                prefixes.add("processing")
-            elif prefix in {"save", "load", "read", "write", "store"}:
-                prefixes.add("persistence")
-            elif prefix in {"send", "receive", "notify", "dispatch"}:
-                prefixes.add("communication")
-            elif prefix in {"render", "display", "show", "format"}:
-                prefixes.add("presentation")
-            elif prefix in {"calculate", "compute", "analyze"}:
-                prefixes.add("computation")
-
-    return prefixes
 
 
 def count_if_chain(method: ast.FunctionDef) -> int:
@@ -143,6 +95,11 @@ def check_ocp(
     """Check Open/Closed Principle."""
     violations = []
     for method in get_class_methods(class_node):
+        if is_format_dispatch(method):  # type: ignore[arg-type]
+            continue
+        if is_inherently_branchy_method(method.name):
+            continue
+
         if_chain_length = count_if_chain(method)
         if if_chain_length >= 4:
             violations.append(SOLIDViolation(
@@ -156,7 +113,9 @@ def check_ocp(
             ))
 
         isinstance_count = count_isinstance_checks(method)
-        if isinstance_count >= 3:
+        if isinstance_count >= 4:
+            if uses_ast_isinstance(method):  # type: ignore[arg-type]
+                continue
             violations.append(SOLIDViolation(
                 principle=SOLIDPrinciple.OCP,
                 class_name=class_node.name,
@@ -252,6 +211,9 @@ def check_dip(
     max_dependencies: int,
 ) -> List[SOLIDViolation]:
     """Check Dependency Inversion Principle."""
+    if is_data_model_class(class_node):
+        return []
+
     violations = []
 
     for method in get_class_methods(class_node):
@@ -259,7 +221,7 @@ def check_dip(
             instantiations = find_instantiations(method)
             concrete_deps = [
                 i for i in instantiations
-                if i not in {"list", "dict", "set", "tuple", "str", "int", "float", "bool"}
+                if i not in BENIGN_INSTANTIATIONS
                 and not i.startswith("_")
             ]
             if len(concrete_deps) > 3:

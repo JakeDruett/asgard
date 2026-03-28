@@ -1,14 +1,9 @@
-import hashlib
 import os
 import re
-import time
-from typing import Any, Dict, List
+from typing import List
 
 from Asgard.Volundr.Validation.models.validation_models import (
-    FileValidationSummary,
     ValidationCategory,
-    ValidationContext,
-    ValidationReport,
     ValidationResult,
     ValidationSeverity,
 )
@@ -17,101 +12,6 @@ SENSITIVE_PATTERNS = [
     "password", "secret", "key", "token", "api_key", "apikey",
     "auth", "credential", "private", "cert", "ssh",
 ]
-
-
-def validate_aws_security_group(
-    content: str, name: str, file_path: str, line_num: int
-) -> List[ValidationResult]:
-    results: List[ValidationResult] = []
-
-    if '0.0.0.0/0' in content and ('ingress' in content.lower()):
-        results.append(ValidationResult(
-            rule_id="sg-open-ingress",
-            message=f"Security group '{name}' allows ingress from 0.0.0.0/0",
-            severity=ValidationSeverity.WARNING,
-            category=ValidationCategory.SECURITY,
-            file_path=file_path,
-            line_number=line_num,
-            resource_name=name,
-            suggestion="Restrict ingress to specific CIDR blocks",
-        ))
-
-    if 'from_port = 0' in content and 'to_port = 65535' in content:
-        results.append(ValidationResult(
-            rule_id="sg-all-ports",
-            message=f"Security group '{name}' opens all ports",
-            severity=ValidationSeverity.ERROR,
-            category=ValidationCategory.SECURITY,
-            file_path=file_path,
-            line_number=line_num,
-            resource_name=name,
-        ))
-
-    return results
-
-
-def validate_aws_s3_bucket(
-    content: str, name: str, file_path: str, line_num: int
-) -> List[ValidationResult]:
-    results: List[ValidationResult] = []
-
-    if 'versioning' not in content.lower():
-        results.append(ValidationResult(
-            rule_id="s3-no-versioning",
-            message=f"S3 bucket '{name}' may not have versioning enabled",
-            severity=ValidationSeverity.INFO,
-            category=ValidationCategory.BEST_PRACTICE,
-            file_path=file_path,
-            line_number=line_num,
-            resource_name=name,
-            suggestion="Consider enabling versioning for data protection",
-        ))
-
-    if 'server_side_encryption' not in content.lower() and 'aws_s3_bucket_server_side_encryption_configuration' not in content:
-        results.append(ValidationResult(
-            rule_id="s3-no-encryption",
-            message=f"S3 bucket '{name}' may not have encryption configured",
-            severity=ValidationSeverity.WARNING,
-            category=ValidationCategory.SECURITY,
-            file_path=file_path,
-            line_number=line_num,
-            resource_name=name,
-            suggestion="Enable server-side encryption",
-        ))
-
-    return results
-
-
-def validate_aws_iam_policy(
-    content: str, name: str, file_path: str, line_num: int
-) -> List[ValidationResult]:
-    results: List[ValidationResult] = []
-
-    if '"Action": "*"' in content or "'Action': '*'" in content or 'Action = "*"' in content:
-        results.append(ValidationResult(
-            rule_id="iam-wildcard-action",
-            message=f"IAM policy '{name}' uses wildcard (*) action",
-            severity=ValidationSeverity.ERROR,
-            category=ValidationCategory.SECURITY,
-            file_path=file_path,
-            line_number=line_num,
-            resource_name=name,
-            suggestion="Use specific actions instead of wildcard",
-        ))
-
-    if '"Resource": "*"' in content or "'Resource': '*'" in content or 'Resource = "*"' in content:
-        results.append(ValidationResult(
-            rule_id="iam-wildcard-resource",
-            message=f"IAM policy '{name}' uses wildcard (*) resource",
-            severity=ValidationSeverity.WARNING,
-            category=ValidationCategory.SECURITY,
-            file_path=file_path,
-            line_number=line_num,
-            resource_name=name,
-            suggestion="Scope resources to specific ARNs",
-        ))
-
-    return results
 
 
 def validate_variable(
@@ -329,59 +229,3 @@ def extract_block(content: str, start_pos: int) -> str:
     return content[start_pos:end_pos]
 
 
-def build_report(
-    files: List[str],
-    results: List[ValidationResult],
-    start_time: float,
-    context: ValidationContext,
-) -> ValidationReport:
-    duration_ms = int((time.time() - start_time) * 1000)
-
-    error_count = sum(1 for r in results if r.severity == ValidationSeverity.ERROR)
-    warning_count = sum(1 for r in results if r.severity == ValidationSeverity.WARNING)
-    info_count = sum(1 for r in results if r.severity == ValidationSeverity.INFO)
-
-    score = 100.0
-    score -= error_count * 10
-    score -= warning_count * 3
-    score -= info_count * 1
-    score = max(0.0, score)
-
-    file_summaries = []
-    results_by_file: Dict[str, List[ValidationResult]] = {}
-    for result in results:
-        fp = result.file_path or "(no file)"
-        if fp not in results_by_file:
-            results_by_file[fp] = []
-        results_by_file[fp].append(result)
-
-    for fp in files:
-        file_results = results_by_file.get(fp, [])
-        file_errors = sum(1 for r in file_results if r.severity == ValidationSeverity.ERROR)
-        file_warnings = sum(1 for r in file_results if r.severity == ValidationSeverity.WARNING)
-        file_info = sum(1 for r in file_results if r.severity == ValidationSeverity.INFO)
-        file_summaries.append(FileValidationSummary(
-            file_path=fp,
-            error_count=file_errors,
-            warning_count=file_warnings,
-            info_count=file_info,
-            passed=file_errors == 0,
-        ))
-
-    report_id = hashlib.sha256(str(results).encode()).hexdigest()[:16]
-
-    return ValidationReport(
-        id=f"terraform-validation-{report_id}",
-        title="Terraform Configuration Validation",
-        validator="TerraformValidator",
-        results=results,
-        file_summaries=file_summaries,
-        total_files=len(files),
-        total_errors=error_count,
-        total_warnings=warning_count,
-        total_info=info_count,
-        passed=error_count == 0,
-        score=score,
-        duration_ms=duration_ms,
-        context=context,
-    )

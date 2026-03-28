@@ -1,10 +1,4 @@
-"""
-Heimdall Technical Debt Analyzer - debt analysis worker functions.
-
-Standalone functions for each debt category analysis and related helpers.
-All functions accept the config and report as explicit parameters so they
-can be called from TechnicalDebtAnalyzer without holding private state.
-"""
+"""Heimdall Technical Debt Analyzer - debt analysis worker functions."""
 
 import ast
 import fnmatch
@@ -27,20 +21,13 @@ def analyze_code_debt(path: Path, report: DebtReport, config: DebtConfig) -> Non
     """Analyze code quality debt."""
     for root, dirs, files in os.walk(path):
         root_path = Path(root)
-
-        dirs[:] = [
-            d for d in dirs
-            if not any(matches_pattern(d, p) for p in config.exclude_patterns)
-        ]
-
+        dirs[:] = [d for d in dirs if not any(matches_pattern(d, p) for p in config.exclude_patterns)]
         for file in files:
             if not should_analyze_file(file, config):
                 continue
-
             file_path = root_path / file
             try:
-                items = analyze_file_complexity(file_path, config)
-                for item in items:
+                for item in analyze_file_complexity(file_path, config):
                     report.add_debt_item(item)
             except Exception:
                 pass
@@ -49,69 +36,52 @@ def analyze_code_debt(path: Path, report: DebtReport, config: DebtConfig) -> Non
 def analyze_file_complexity(file_path: Path, config: DebtConfig) -> List[DebtItem]:
     """Analyze complexity-related debt in a file."""
     debt_items = []
-
     try:
         source = file_path.read_text(encoding="utf-8")
         tree = ast.parse(source)
-
         visitor = ComplexityVisitor()
         visitor.visit(tree)
-
         for func_name, complexity, line_no in visitor.complex_functions:
             severity = DebtSeverity.CRITICAL if complexity > 30 else DebtSeverity.HIGH
             effort = config.effort_models.complexity_reduction_factor * complexity
-
             debt_items.append(DebtItem(
-                debt_type=DebtType.CODE,
-                file_path=str(file_path.absolute()),
+                debt_type=DebtType.CODE, file_path=str(file_path.absolute()),
                 line_number=line_no,
                 description=f"High complexity function '{func_name}' (complexity: {complexity})",
-                severity=severity,
-                effort_hours=effort,
+                severity=severity, effort_hours=effort,
                 business_impact=get_business_impact(str(file_path), config),
                 interest_rate=config.interest_rates.high_complexity,
                 remediation_strategy="Break down into smaller functions, reduce nesting, extract helper methods",
             ))
-
         for func_name, length, line_no in visitor.long_methods:
             effort = config.effort_models.refactoring_log_factor * math.log(length)
-
             debt_items.append(DebtItem(
-                debt_type=DebtType.CODE,
-                file_path=str(file_path.absolute()),
+                debt_type=DebtType.CODE, file_path=str(file_path.absolute()),
                 line_number=line_no,
                 description=f"Long method '{func_name}' ({length} lines)",
-                severity=DebtSeverity.MEDIUM,
-                effort_hours=effort,
+                severity=DebtSeverity.MEDIUM, effort_hours=effort,
                 business_impact=get_business_impact(str(file_path), config),
                 interest_rate=config.interest_rates.high_complexity * 0.5,
                 remediation_strategy="Extract methods, simplify logic, apply single responsibility",
             ))
-
     except SyntaxError:
         pass
     except Exception:
         pass
-
     return debt_items
 
 
 def analyze_design_debt(path: Path, report: DebtReport, config: DebtConfig) -> None:
     """Analyze architectural/design debt."""
     dependency_map = build_dependency_map(path, config)
-
     for file_path, dependencies in dependency_map.items():
         if len(dependencies) > 10:
             effort = math.log(len(dependencies)) * 3
             severity = DebtSeverity.HIGH if len(dependencies) > 15 else DebtSeverity.MEDIUM
-
             report.add_debt_item(DebtItem(
-                debt_type=DebtType.DESIGN,
-                file_path=file_path,
-                line_number=1,
+                debt_type=DebtType.DESIGN, file_path=file_path, line_number=1,
                 description=f"High coupling: {len(dependencies)} dependencies",
-                severity=severity,
-                effort_hours=effort,
+                severity=severity, effort_hours=effort,
                 business_impact=get_business_impact(file_path, config),
                 interest_rate=config.interest_rates.design_issues,
                 remediation_strategy="Reduce dependencies, apply dependency inversion, use interfaces",
@@ -122,13 +92,8 @@ def analyze_test_debt(path: Path, report: DebtReport, config: DebtConfig) -> Non
     """Analyze test coverage debt."""
     python_files = []
     test_files = set()
-
     for root, dirs, files in os.walk(path):
-        dirs[:] = [
-            d for d in dirs
-            if not any(matches_pattern(d, p) for p in config.exclude_patterns)
-        ]
-
+        dirs[:] = [d for d in dirs if not any(matches_pattern(d, p) for p in config.exclude_patterns)]
         for file in files:
             if file.endswith(".py"):
                 file_path = os.path.join(root, file)
@@ -136,33 +101,22 @@ def analyze_test_debt(path: Path, report: DebtReport, config: DebtConfig) -> Non
                     test_files.add(file_path)
                 else:
                     python_files.append(file_path)
-
     for file_path in python_files:
         base_name = os.path.basename(file_path)
-        test_variants = [
-            f"test_{base_name}",
-            base_name.replace(".py", "_test.py"),
-        ]
-
+        test_variants = [f"test_{base_name}", base_name.replace(".py", "_test.py")]
         has_tests = any(
             variant in os.path.basename(tf) for tf in test_files for variant in test_variants
         )
-
         if not has_tests:
             loc = count_file_lines(file_path)
             if loc == 0:
                 continue
-
             effort = config.effort_models.test_coverage_factor * loc
             severity = DebtSeverity.HIGH if loc > 100 else DebtSeverity.MEDIUM
-
             report.add_debt_item(DebtItem(
-                debt_type=DebtType.TEST,
-                file_path=file_path,
-                line_number=1,
+                debt_type=DebtType.TEST, file_path=file_path, line_number=1,
                 description=f"No test coverage found ({loc} lines)",
-                severity=severity,
-                effort_hours=effort,
+                severity=severity, effort_hours=effort,
                 business_impact=get_business_impact(file_path, config),
                 interest_rate=config.interest_rates.no_tests,
                 remediation_strategy="Write unit tests for public functions and critical paths",
@@ -173,31 +127,22 @@ def analyze_documentation_debt(path: Path, report: DebtReport, config: DebtConfi
     """Analyze documentation debt."""
     for root, dirs, files in os.walk(path):
         root_path = Path(root)
-
-        dirs[:] = [
-            d for d in dirs
-            if not any(matches_pattern(d, p) for p in config.exclude_patterns)
-        ]
-
+        dirs[:] = [d for d in dirs if not any(matches_pattern(d, p) for p in config.exclude_patterns)]
         for file in files:
             if not should_analyze_file(file, config):
                 continue
-
             file_path = root_path / file
             try:
                 undocumented = find_undocumented_functions(file_path)
-
                 if undocumented:
                     effort = config.effort_models.documentation_factor * len(undocumented)
                     severity = DebtSeverity.MEDIUM if len(undocumented) > 5 else DebtSeverity.LOW
-
                     report.add_debt_item(DebtItem(
                         debt_type=DebtType.DOCUMENTATION,
                         file_path=str(file_path.absolute()),
                         line_number=undocumented[0][1] if undocumented else 1,
                         description=f"{len(undocumented)} undocumented public functions",
-                        severity=severity,
-                        effort_hours=effort,
+                        severity=severity, effort_hours=effort,
                         business_impact=get_business_impact(str(file_path), config),
                         interest_rate=config.interest_rates.poor_docs,
                         remediation_strategy="Add docstrings to public functions following project standards",
@@ -208,14 +153,11 @@ def analyze_documentation_debt(path: Path, report: DebtReport, config: DebtConfi
 
 def analyze_dependency_debt(path: Path, report: DebtReport, config: DebtConfig) -> None:
     """Analyze dependency-related debt."""
-    req_files = ["requirements.txt", "setup.py", "pyproject.toml"]
-
-    for req_file in req_files:
+    for req_file in ["requirements.txt", "setup.py", "pyproject.toml"]:
         req_path = path / req_file
         if req_path.exists():
             report.add_debt_item(DebtItem(
-                debt_type=DebtType.DEPENDENCIES,
-                file_path=str(req_path.absolute()),
+                debt_type=DebtType.DEPENDENCIES, file_path=str(req_path.absolute()),
                 line_number=1,
                 description="Dependencies may need security updates (run pip-audit or safety)",
                 severity=DebtSeverity.MEDIUM,
@@ -232,30 +174,23 @@ def get_business_impact(file_path: str, config: DebtConfig) -> float:
     for pattern, weight in config.business_value_weights.items():
         if pattern in file_path:
             return cast(float, weight)
-
     if "core" in file_path.lower() or "main" in file_path.lower():
         return 0.9
     elif "util" in file_path.lower() or "helper" in file_path.lower():
         return 0.3
     elif "test" in file_path.lower():
         return 0.1
-    else:
-        return 0.5
+    return 0.5
 
 
 def count_lines_of_code(path: Path, config: DebtConfig) -> int:
     """Count total lines of code in project."""
     total_lines = 0
     for root, dirs, files in os.walk(path):
-        dirs[:] = [
-            d for d in dirs
-            if not any(matches_pattern(d, p) for p in config.exclude_patterns)
-        ]
-
+        dirs[:] = [d for d in dirs if not any(matches_pattern(d, p) for p in config.exclude_patterns)]
         for file in files:
             if should_analyze_file(file, config):
-                file_path = os.path.join(root, file)
-                total_lines += count_file_lines(file_path)
+                total_lines += count_file_lines(os.path.join(root, file))
     return total_lines
 
 
@@ -271,25 +206,17 @@ def count_file_lines(file_path: str) -> int:
 def build_dependency_map(path: Path, config: DebtConfig) -> Dict[str, List[str]]:
     """Build map of file dependencies."""
     dependency_map: Dict[str, List[str]] = {}
-
     for root, dirs, files in os.walk(path):
-        dirs[:] = [
-            d for d in dirs
-            if not any(matches_pattern(d, p) for p in config.exclude_patterns)
-        ]
-
+        dirs[:] = [d for d in dirs if not any(matches_pattern(d, p) for p in config.exclude_patterns)]
         for file in files:
             if not should_analyze_file(file, config):
                 continue
-
             file_path = os.path.join(root, file)
             try:
                 with open(file_path, "r", encoding="utf-8") as f:
                     source = f.read()
-
                 tree = ast.parse(source)
                 dependencies = []
-
                 for node in ast.walk(tree):
                     if isinstance(node, ast.Import):
                         for alias in node.names:
@@ -297,11 +224,9 @@ def build_dependency_map(path: Path, config: DebtConfig) -> Dict[str, List[str]]
                     elif isinstance(node, ast.ImportFrom):
                         if node.module:
                             dependencies.append(node.module)
-
                 dependency_map[file_path] = dependencies
             except Exception:
                 dependency_map[file_path] = []
-
     return dependency_map
 
 
@@ -311,15 +236,12 @@ def find_undocumented_functions(file_path: Path) -> List[Tuple[str, int]]:
         source = file_path.read_text(encoding="utf-8")
         tree = ast.parse(source)
         undocumented = []
-
         for node in ast.walk(tree):
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 if node.name.startswith("_"):
                     continue
-
                 if not ast.get_docstring(node):
                     undocumented.append((node.name, node.lineno))
-
         return undocumented
     except Exception:
         return []

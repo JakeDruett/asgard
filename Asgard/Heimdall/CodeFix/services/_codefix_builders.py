@@ -1,9 +1,4 @@
-"""
-Heimdall CodeFix - rule-specific fix builder functions.
-
-Standalone functions that construct CodeFix instances for known rule IDs.
-Each function accepts (code_snippet, context) and returns a CodeFix.
-"""
+"""Heimdall CodeFix - rule-specific fix builder functions."""
 
 import re
 from typing import Any, Dict
@@ -31,9 +26,7 @@ def fix_lazy_imports(code_snippet: str, context: Dict[str, Any]) -> CodeFix:
             "All imports must appear at module level (PEP 8). "
             "Move the import statement to the top of the file, below any existing imports."
         ),
-        references=[
-            "https://peps.python.org/pep-0008/#imports",
-        ],
+        references=["https://peps.python.org/pep-0008/#imports"],
     )
 
 
@@ -59,9 +52,7 @@ def fix_env_fallback(code_snippet: str, context: Dict[str, Any]) -> CodeFix:
             "Replace os.environ.get('KEY', 'default') with os.environ['KEY'] "
             "so that missing variables raise an error at startup."
         ),
-        references=[
-            "https://12factor.net/config",
-        ],
+        references=["https://12factor.net/config"],
     )
 
 
@@ -134,10 +125,7 @@ def fix_var_declaration(code_snippet: str, context: Dict[str, Any]) -> CodeFix:
 def fix_hardcoded_secret(code_snippet: str, context: Dict[str, Any]) -> CodeFix:
     """Build fix suggestion for hardcoded secrets."""
     var_name = context.get("variable_name", "SECRET_KEY")
-    fixed_code = (
-        f"import os\n"
-        f"{var_name} = os.environ['{var_name}']\n"
-    )
+    fixed_code = f"import os\n{var_name} = os.environ['{var_name}']\n"
     return CodeFix(
         rule_id="security.hardcoded_secret",
         title="Move secret to environment variable",
@@ -148,9 +136,8 @@ def fix_hardcoded_secret(code_snippet: str, context: Dict[str, Any]) -> CodeFix:
         fixed_code=fixed_code,
         explanation=(
             "Secrets in source code are exposed in version control history. "
-            "Remove the literal value, store it in an environment variable, "
-            "and load it with os.environ['KEY']. "
-            "Rotate the secret immediately if it has been committed."
+            "Remove the literal value, store it in an environment variable "
+            "with os.environ['KEY']. Rotate the secret if it has been committed."
         ),
         references=[
             "https://owasp.org/www-project-top-ten/2017/A3_2017-Sensitive_Data_Exposure",
@@ -171,9 +158,8 @@ def fix_eval_injection(code_snippet: str, context: Dict[str, Any]) -> CodeFix:
         fixed_code="import ast\nresult = ast.literal_eval(expression)  # safe for literal Python values only",
         explanation=(
             "eval() with untrusted input enables remote code execution. "
-            "For parsing Python literals (strings, numbers, lists, dicts), "
-            "use ast.literal_eval(). For JSON, use json.loads(). "
-            "For structured computation, define an explicit parser."
+            "Use ast.literal_eval() for Python literals, json.loads() for JSON, "
+            "or define an explicit parser for structured computation."
         ),
         references=[
             "https://owasp.org/www-community/attacks/Code_Injection",
@@ -194,8 +180,7 @@ def fix_insecure_deserialization(code_snippet: str, context: Dict[str, Any]) -> 
         fixed_code="import json\ndata = json.loads(serialized_data)",
         explanation=(
             "pickle deserialization of untrusted data can execute arbitrary Python code. "
-            "Replace pickle with json.loads() for simple data structures, "
-            "or use a schema-validated format (e.g., protobuf, msgpack with schema) "
+            "Replace with json.loads() for simple data or a schema-validated format "
             "for complex types. Only use pickle for trusted, internally generated data."
         ),
         references=[
@@ -216,19 +201,13 @@ def fix_shell_missing_set_e(code_snippet: str, context: Dict[str, Any]) -> CodeF
     return CodeFix(
         rule_id="shell.missing_set_e",
         title="Add 'set -e' to exit on error",
-        description="Shell scripts should include 'set -e' to exit immediately when a command fails, preventing silent errors.",
+        description="Shell scripts should include 'set -e' to exit immediately when a command fails.",
         fix_type=FixType.AUTOMATED,
         confidence=FixConfidence.HIGH,
         original_code=code_snippet,
         fixed_code=fixed,
-        explanation=(
-            "'set -e' causes the script to exit immediately if any command exits with a non-zero status. "
-            "This prevents subsequent commands from executing in a broken state. "
-            "Add it at the top of the script, after the shebang line."
-        ),
-        references=[
-            "https://www.gnu.org/software/bash/manual/bash.html#The-Set-Builtin",
-        ],
+        explanation="'set -e' causes the script to exit immediately if any command exits with a non-zero status. Add it at the top of the script, after the shebang line.",
+        references=["https://www.gnu.org/software/bash/manual/bash.html#The-Set-Builtin"],
     )
 
 
@@ -239,7 +218,7 @@ def fix_shell_curl_insecure(code_snippet: str, context: Dict[str, Any]) -> CodeF
     return CodeFix(
         rule_id="shell.curl_insecure",
         title="Remove -k/--insecure flag from curl",
-        description="The -k (--insecure) flag disables TLS certificate verification, exposing the connection to man-in-the-middle attacks.",
+        description="The -k (--insecure) flag disables TLS certificate verification, exposing the connection to MITM attacks.",
         fix_type=FixType.AUTOMATED,
         confidence=FixConfidence.HIGH,
         original_code=code_snippet,
@@ -247,7 +226,7 @@ def fix_shell_curl_insecure(code_snippet: str, context: Dict[str, Any]) -> CodeF
         explanation=(
             "Removing -k restores certificate verification. "
             "If the connection fails after removal, fix the underlying certificate issue "
-            "(expired, self-signed, or hostname mismatch) rather than disabling verification."
+            "rather than disabling verification."
         ),
         references=[
             "https://curl.se/docs/manpage.html#-k",
@@ -274,9 +253,7 @@ def fix_snake_case_violation(code_snippet: str, context: Dict[str, Any]) -> Code
             "Update all references throughout the codebase. "
             "Use your IDE's rename refactoring to avoid missing any call sites."
         ),
-        references=[
-            "https://peps.python.org/pep-0008/#function-and-variable-names",
-        ],
+        references=["https://peps.python.org/pep-0008/#function-and-variable-names"],
     )
 
 
@@ -296,9 +273,7 @@ def fix_pascal_case_violation(code_snippet: str, context: Dict[str, Any]) -> Cod
             f"Rename '{name}' to '{pascal}'. "
             "Update all references and imports throughout the codebase."
         ),
-        references=[
-            "https://peps.python.org/pep-0008/#class-names",
-        ],
+        references=["https://peps.python.org/pep-0008/#class-names"],
     )
 
 

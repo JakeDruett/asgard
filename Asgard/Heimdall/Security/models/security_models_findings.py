@@ -1,8 +1,4 @@
-"""
-Heimdall Security Analysis Report Models
-
-Report models that aggregate findings from security scans.
-"""
+"""Heimdall Security Analysis Report Models - aggregate findings from security scans."""
 
 from datetime import datetime
 from typing import Any, Dict, List, Optional
@@ -212,42 +208,34 @@ class SecurityReport(BaseModel):
             for finding in self.secrets_report.findings:
                 self.total_issues += 1
                 self._increment_severity_count(finding.severity)
-
         if self.vulnerability_report:
             for vuln_finding in self.vulnerability_report.findings:
                 self.total_issues += 1
                 self._increment_severity_count(vuln_finding.severity)
-
         if self.dependency_report:
             for vuln in self.dependency_report.vulnerabilities:
                 self.total_issues += 1
                 self._increment_risk_count(vuln.risk_level)
-
         if self.crypto_report:
             for crypto_finding in self.crypto_report.findings:
                 self.total_issues += 1
                 self._increment_severity_count(crypto_finding.severity)
-
         if self.access_report and hasattr(self.access_report, 'findings'):
             for finding in self.access_report.findings:
                 self.total_issues += 1
                 self._increment_severity_count(finding.severity)
-
         if self.auth_report and hasattr(self.auth_report, 'findings'):
             for finding in self.auth_report.findings:
                 self.total_issues += 1
                 self._increment_severity_count(finding.severity)
-
         if self.headers_report and hasattr(self.headers_report, 'findings'):
             for finding in self.headers_report.findings:
                 self.total_issues += 1
                 self._increment_severity_count(finding.severity)
-
         if self.tls_report and hasattr(self.tls_report, 'findings'):
             for finding in self.tls_report.findings:
                 self.total_issues += 1
                 self._increment_severity_count(finding.severity)
-
         if self.container_report and hasattr(self.container_report, 'findings'):
             for finding in self.container_report.findings:
                 self.total_issues += 1

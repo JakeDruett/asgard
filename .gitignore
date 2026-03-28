@@ -69,6 +69,7 @@ reports/
 baselines/
 scan_results/
 *.baseline.json
+**.html
 
 # Misc
 *.log

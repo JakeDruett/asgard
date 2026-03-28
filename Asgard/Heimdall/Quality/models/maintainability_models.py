@@ -1,17 +1,4 @@
-"""
-Heimdall Maintainability Models
-
-Pydantic models for maintainability index calculation and analysis.
-
-Maintainability Index Formula (Microsoft):
-MI = 171 - 5.2 * ln(HV) - 0.23 * CC - 16.2 * ln(LOC) + 50 * sin(sqrt(2.4 * CM))
-
-Where:
-- HV = Halstead Volume
-- CC = Cyclomatic Complexity
-- LOC = Lines of Code
-- CM = Comment percentage (0-100)
-"""
+"""Heimdall Maintainability Models - MI = 171 - 5.2*ln(HV) - 0.23*CC - 16.2*ln(LOC) + 50*sin(sqrt(2.4*CM))."""
 
 import math
 import os
@@ -40,11 +27,7 @@ class LanguageProfile(str, Enum):
 
 
 class HalsteadMetrics(BaseModel):
-    """
-    Halstead complexity metrics.
-
-    Measures software complexity based on operators and operands.
-    """
+    """Halstead complexity metrics based on operators and operands."""
     n1: int = Field(0, description="Number of distinct operators")
     n2: int = Field(0, description="Number of distinct operands")
     N1: int = Field(0, description="Total number of operators")

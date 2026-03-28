@@ -19,12 +19,14 @@ from Asgard.Freya.Accessibility.models.accessibility_models import (
     WCAGLevel,
 )
 from Asgard.Freya.Accessibility.services._wcag_checks import (
-    check_aria_basic,
     check_forms,
     check_images,
+    check_structure,
+)
+from Asgard.Freya.Accessibility.services._wcag_checks_part2 import (
+    check_aria_basic,
     check_language,
     check_links,
-    check_structure,
 )
 from Asgard.Freya.Accessibility.services._wcag_criteria import WCAG_CRITERIA
 

@@ -1,9 +1,4 @@
-"""
-Heimdall License Checker Service
-
-Validates that all packages in requirements have acceptable licenses
-for commercial use without licensing costs.
-"""
+"""Heimdall License Checker - validates package license compliance."""
 
 import re
 import subprocess
@@ -31,9 +26,7 @@ from Asgard.Heimdall.Dependencies.services._license_reporter import (
 )
 
 
-# License name normalization patterns
 LICENSE_PATTERNS = {
-    # Permissive licenses
     r"MIT|Expat": ("MIT", LicenseCategory.PERMISSIVE),
     r"Apache.*(2|2\.0)|Apache License,? Version 2|Apache Software License": ("Apache-2.0", LicenseCategory.PERMISSIVE),
     r"BSD.*(3|3-Clause|New|Revised)|BSD 3-Clause": ("BSD-3-Clause", LicenseCategory.PERMISSIVE),
@@ -44,11 +37,9 @@ LICENSE_PATTERNS = {
     r"Unlicense|Public Domain": ("Unlicense", LicenseCategory.PUBLIC_DOMAIN),
     r"CC0|Creative Commons Zero": ("CC0-1.0", LicenseCategory.PUBLIC_DOMAIN),
     r"WTFPL": ("WTFPL", LicenseCategory.PUBLIC_DOMAIN),
-    # Weak copyleft
     r"LGPL.*(3|3\.0)": ("LGPL-3.0", LicenseCategory.WEAK_COPYLEFT),
     r"LGPL.*(2\.1|2)": ("LGPL-2.1", LicenseCategory.WEAK_COPYLEFT),
     r"MPL.*(2|2\.0)|Mozilla Public License": ("MPL-2.0", LicenseCategory.WEAK_COPYLEFT),
-    # Strong copyleft
     r"AGPL.*(3|3\.0)": ("AGPL-3.0", LicenseCategory.STRONG_COPYLEFT),
     r"GPL.*(3|3\.0)": ("GPL-3.0", LicenseCategory.STRONG_COPYLEFT),
     r"GPL.*(2|2\.0)": ("GPL-2.0", LicenseCategory.STRONG_COPYLEFT),
@@ -57,28 +48,14 @@ LICENSE_PATTERNS = {
 
 
 class LicenseChecker:
-    """
-    Validates license compliance for Python packages.
-
-    Features:
-    - Checks packages against allowed/prohibited license lists
-    - Uses pip show and PyPI API for license info
-    - Categorizes licenses by copyleft level
-    - Generates compliance reports
-    """
+    """Validates license compliance for Python packages."""
 
     def __init__(self, config: LicenseConfig):
-        """Initialize the license checker."""
         self.config = config
         self._cache: Dict[str, PackageLicense] = {}
 
     def analyze(self) -> LicenseResult:
-        """
-        Run license analysis on packages in requirements.
-
-        Returns:
-            LicenseResult with all findings
-        """
+        """Run license analysis on packages in requirements."""
         start_time = time.time()
         scan_path = Path(self.config.scan_path).resolve()
 
@@ -109,45 +86,37 @@ class LicenseChecker:
         """Parse all requirements files and get package names."""
         packages: Set[str] = set()
         found_files = []
-
         for req_file in self.config.requirements_files:
             req_path = scan_path / req_file
             if req_path.exists():
                 found_files.append(req_file)
                 pkg_names = self._parse_requirements_file(req_path)
                 packages.update(pkg_names)
-
         return packages, found_files
 
     def _parse_requirements_file(self, req_path: Path) -> Set[str]:
         """Parse a single requirements file for package names."""
         packages = set()
         content = req_path.read_text()
-
         for line in content.split("\n"):
             line = line.strip()
             if not line or line.startswith("#") or line.startswith("-"):
                 continue
-
             pkg_name = self._extract_package_name(line)
             if pkg_name:
                 packages.add(pkg_name.lower())
-
         return packages
 
     def _extract_package_name(self, line: str) -> Optional[str]:
         """Extract package name from a requirements line."""
         if "[" in line:
             line = line.split("[")[0]
-
         for op in ["===", "~=", "==", ">=", "<=", "!=", ">", "<", "@"]:
             if op in line:
                 line = line.split(op)[0]
                 break
-
         if ";" in line:
             line = line.split(";")[0]
-
         return line.strip() or None
 
     def _get_package_license(self, package_name: str) -> PackageLicense:
@@ -156,10 +125,8 @@ class LicenseChecker:
             return self._cache[package_name]
 
         lic_info = self._get_license_from_pip(package_name)
-
         if lic_info is None:
             lic_info = self._get_license_from_pypi(package_name)
-
         if lic_info is None:
             lic_info = PackageLicense(
                 package_name=package_name,
@@ -169,10 +136,8 @@ class LicenseChecker:
             )
 
         lic_info = self._classify_license(lic_info)
-
         if self.config.use_cache:
             self._cache[package_name] = lic_info
-
         return lic_info
 
     def _get_license_from_pip(self, package_name: str) -> Optional[PackageLicense]:
@@ -180,21 +145,15 @@ class LicenseChecker:
         try:
             result = subprocess.run(
                 ["pip", "show", package_name],
-                capture_output=True,
-                text=True,
-                timeout=10,
-                check=False,
+                capture_output=True, text=True, timeout=10, check=False,
             )
-
             if result.returncode != 0:
                 return None
-
             info = {}
             for line in result.stdout.split("\n"):
                 if ": " in line:
                     key, value = line.split(": ", 1)
                     info[key.strip().lower()] = value.strip()
-
             return PackageLicense(
                 package_name=package_name,
                 version=info.get("version"),
@@ -203,7 +162,6 @@ class LicenseChecker:
                 author=info.get("author"),
                 source="pip",
             )
-
         except (subprocess.TimeoutExpired, FileNotFoundError):
             return None
 
@@ -213,16 +171,13 @@ class LicenseChecker:
             url = f"https://pypi.org/pypi/{package_name}/json"
             with urllib.request.urlopen(url, timeout=10) as response:
                 data = json.loads(response.read().decode())
-
             info = data.get("info", {})
             classifiers = info.get("classifiers", [])
-
             license_classifier = None
             for classifier in classifiers:
                 if classifier.startswith("License ::"):
                     license_classifier = classifier.split(" :: ")[-1]
                     break
-
             return PackageLicense(
                 package_name=package_name,
                 version=info.get("version"),
@@ -232,7 +187,6 @@ class LicenseChecker:
                 author=info.get("author"),
                 source="pypi",
             )
-
         except (urllib.error.URLError, json.JSONDecodeError, TimeoutError):
             return None
 
@@ -243,20 +197,15 @@ class LicenseChecker:
         category = LicenseCategory.UNKNOWN
 
         if pkg_lic.license_classifier:
-            classifier_text = pkg_lic.license_classifier
-            normalized_name, category = self._normalize_license(classifier_text)
+            normalized_name, category = self._normalize_license(pkg_lic.license_classifier)
             if category != LicenseCategory.UNKNOWN:
-                license_text = classifier_text
+                license_text = pkg_lic.license_classifier
 
         if category == LicenseCategory.UNKNOWN and pkg_lic.license_name:
             name_text = pkg_lic.license_name
             if len(name_text) > 100:
                 first_line = name_text.split("\n")[0].strip()
-                if first_line and len(first_line) < 100:
-                    name_text = first_line
-                else:
-                    name_text = ""
-
+                name_text = first_line if first_line and len(first_line) < 100 else ""
             if name_text:
                 normalized_name, category = self._normalize_license(name_text)
                 if category != LicenseCategory.UNKNOWN:
@@ -267,7 +216,6 @@ class LicenseChecker:
         pkg_lic.category = category
 
         license_lower = license_text.lower().strip()
-
         if license_lower:
             for prohibited in self.config.prohibited_licenses:
                 prohibited_lower = prohibited.lower()
@@ -276,7 +224,6 @@ class LicenseChecker:
                     pkg_lic.is_allowed = False
                     pkg_lic.severity = LicenseSeverity.CRITICAL
                     break
-
             if not pkg_lic.is_prohibited:
                 for warn in self.config.warn_licenses:
                     warn_lower = warn.lower()
@@ -284,7 +231,6 @@ class LicenseChecker:
                         pkg_lic.is_warning = True
                         pkg_lic.severity = LicenseSeverity.LOW
                         break
-
             if not pkg_lic.is_prohibited:
                 for allowed in self.config.allowed_licenses:
                     allowed_lower = allowed.lower()
@@ -303,17 +249,14 @@ class LicenseChecker:
         """Normalize license name and determine category."""
         if not license_text:
             return None, LicenseCategory.UNKNOWN
-
         for pattern, (name, category) in LICENSE_PATTERNS.items():
             if re.search(pattern, license_text, re.IGNORECASE):
                 return name, category
-
         return None, LicenseCategory.UNKNOWN
 
     def _find_issues(self, packages: List[PackageLicense]) -> List[LicenseIssue]:
         """Find license compliance issues."""
         issues = []
-
         for pkg in packages:
             if pkg.is_prohibited:
                 issues.append(LicenseIssue(
@@ -322,27 +265,18 @@ class LicenseChecker:
                     package_name=pkg.package_name,
                     license_name=pkg.display_license,
                     message=f"Package '{pkg.package_name}' has prohibited license: {pkg.display_license}",
-                    details={
-                        "category": pkg.category.value,
-                        "version": pkg.version,
-                    },
+                    details={"category": pkg.category.value, "version": pkg.version},
                 ))
-
             elif pkg.category in (LicenseCategory.WEAK_COPYLEFT, LicenseCategory.STRONG_COPYLEFT):
                 severity = LicenseSeverity.HIGH if pkg.category == LicenseCategory.STRONG_COPYLEFT else LicenseSeverity.LOW
-
                 issues.append(LicenseIssue(
                     issue_type=LicenseIssueType.COPYLEFT,
                     severity=severity,
                     package_name=pkg.package_name,
                     license_name=pkg.display_license,
                     message=f"Package '{pkg.package_name}' has copyleft license: {pkg.display_license}",
-                    details={
-                        "category": pkg.category.value,
-                        "version": pkg.version,
-                    },
+                    details={"category": pkg.category.value, "version": pkg.version},
                 ))
-
             elif pkg.category == LicenseCategory.UNKNOWN:
                 issues.append(LicenseIssue(
                     issue_type=LicenseIssueType.UNKNOWN,
@@ -350,12 +284,8 @@ class LicenseChecker:
                     package_name=pkg.package_name,
                     license_name=pkg.display_license,
                     message=f"Package '{pkg.package_name}' has unknown license: {pkg.display_license}",
-                    details={
-                        "source": pkg.source,
-                        "version": pkg.version,
-                    },
+                    details={"source": pkg.source, "version": pkg.version},
                 ))
-
         return issues
 
     def generate_report(self, result: LicenseResult, output_format: str = "text") -> str:

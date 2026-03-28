@@ -1,11 +1,4 @@
-"""
-Heimdall Issue Tracker Service
-
-Persists and manages tracked issues using a local SQLite database at
-~/.asgard/issues.db.  Supports upsert (find-or-create with line-proximity
-matching), lifecycle status transitions, assignment, commenting, and
-git blame enrichment.
-"""
+"""Heimdall Issue Tracker - persists and manages issues in a local SQLite database."""
 
 import json
 import sqlite3
@@ -34,12 +27,7 @@ from Asgard.Heimdall.Issues.services._issue_queries import build_summary, query_
 
 
 class IssueTracker:
-    """
-    Manages persistent issue lifecycle tracking backed by a local SQLite database.
-
-    The database is stored at ~/.asgard/issues.db by default and uses WAL mode
-    for better concurrent-read performance.
-    """
+    """Manages persistent issue lifecycle tracking backed by a local SQLite database."""
 
     def __init__(self, db_path: Optional[Path] = None) -> None:
         self._db_path = db_path or Path.home() / ".asgard" / "issues.db"
@@ -55,7 +43,7 @@ class IssueTracker:
             conn.commit()
 
     def _get_connection(self) -> sqlite3.Connection:
-        """Open and return a database connection with WAL mode enabled."""
+        """Open a database connection with WAL mode enabled."""
         conn = sqlite3.connect(str(self._db_path))
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA journal_mode=WAL")
@@ -72,27 +60,7 @@ class IssueTracker:
         title: str,
         description: str,
     ) -> TrackedIssue:
-        """
-        Insert a new issue or update an existing matching issue.
-
-        Matching is performed by (project_path, rule_id, file_path) where the
-        stored line_number is within _LINE_PROXIMITY lines of the given
-        line_number.  When a match is found, last_seen and scan_count are
-        updated.  When no match is found, a new issue is created with a UUID.
-
-        Args:
-            project_path: Absolute path of the project root.
-            rule_id: Rule identifier that produced the finding.
-            file_path: Absolute path of the file containing the issue.
-            line_number: Line number of the finding.
-            issue_type: Classification of the issue type.
-            severity: Severity level of the issue.
-            title: Short descriptive title.
-            description: Detailed description of the issue.
-
-        Returns:
-            The upserted TrackedIssue.
-        """
+        """Insert a new issue or update an existing match (by rule, file, line proximity)."""
         now_str = datetime.now().isoformat()
         issue_type_val = issue_type if isinstance(issue_type, str) else issue_type.value
         severity_val = severity if isinstance(severity, str) else severity.value
@@ -156,19 +124,7 @@ class IssueTracker:
             return row_to_issue(row)
 
     def mark_resolved(self, project_path: str, scan_start_time: datetime) -> int:
-        """
-        Mark as resolved all open/confirmed issues not observed in the latest scan.
-
-        Issues whose last_seen timestamp is before scan_start_time are assumed
-        to have been fixed and are transitioned to 'resolved'.
-
-        Args:
-            project_path: The project whose issues should be evaluated.
-            scan_start_time: The datetime the most recent scan began.
-
-        Returns:
-            Number of issues transitioned to resolved.
-        """
+        """Mark as resolved all open/confirmed issues not seen in the latest scan."""
         now_str = datetime.now().isoformat()
         scan_start_str = scan_start_time.isoformat()
         with self._get_connection() as conn:
@@ -186,30 +142,15 @@ class IssueTracker:
             return cursor.rowcount
 
     def update_status(
-        self,
-        issue_id: str,
-        new_status: IssueStatus,
-        reason: Optional[str] = None,
+        self, issue_id: str, new_status: IssueStatus, reason: Optional[str] = None,
     ) -> Optional[TrackedIssue]:
-        """
-        Transition an issue to a new lifecycle status.
-
-        Args:
-            issue_id: UUID of the issue to update.
-            new_status: The target status.
-            reason: Optional reason string (stored in false_positive_reason
-                    when new_status is FALSE_POSITIVE).
-
-        Returns:
-            Updated TrackedIssue, or None if the issue_id was not found.
-        """
+        """Transition an issue to a new lifecycle status."""
         status_val = new_status if isinstance(new_status, str) else new_status.value
         now_str = datetime.now().isoformat()
 
         with self._get_connection() as conn:
             row = conn.execute(
-                "SELECT * FROM issues WHERE issue_id = ?",
-                (issue_id,),
+                "SELECT * FROM issues WHERE issue_id = ?", (issue_id,),
             ).fetchone()
             if not row:
                 return None
@@ -231,22 +172,12 @@ class IssueTracker:
             )
             conn.commit()
             updated = conn.execute(
-                "SELECT * FROM issues WHERE issue_id = ?",
-                (issue_id,),
+                "SELECT * FROM issues WHERE issue_id = ?", (issue_id,),
             ).fetchone()
             return row_to_issue(updated)
 
     def assign_issue(self, issue_id: str, assignee: str) -> Optional[TrackedIssue]:
-        """
-        Assign an issue to a user.
-
-        Args:
-            issue_id: UUID of the issue.
-            assignee: Username or email to assign to.
-
-        Returns:
-            Updated TrackedIssue, or None if not found.
-        """
+        """Assign an issue to a user."""
         with self._get_connection() as conn:
             cursor = conn.execute(
                 "UPDATE issues SET assigned_to = ? WHERE issue_id = ?",
@@ -256,26 +187,15 @@ class IssueTracker:
             if cursor.rowcount == 0:
                 return None
             row = conn.execute(
-                "SELECT * FROM issues WHERE issue_id = ?",
-                (issue_id,),
+                "SELECT * FROM issues WHERE issue_id = ?", (issue_id,),
             ).fetchone()
             return row_to_issue(row)
 
     def add_comment(self, issue_id: str, comment: str) -> Optional[TrackedIssue]:
-        """
-        Append a comment to an issue.
-
-        Args:
-            issue_id: UUID of the issue.
-            comment: Free-text comment to append.
-
-        Returns:
-            Updated TrackedIssue, or None if not found.
-        """
+        """Append a comment to an issue."""
         with self._get_connection() as conn:
             row = conn.execute(
-                "SELECT * FROM issues WHERE issue_id = ?",
-                (issue_id,),
+                "SELECT * FROM issues WHERE issue_id = ?", (issue_id,),
             ).fetchone()
             if not row:
                 return None
@@ -287,78 +207,38 @@ class IssueTracker:
             )
             conn.commit()
             updated = conn.execute(
-                "SELECT * FROM issues WHERE issue_id = ?",
-                (issue_id,),
+                "SELECT * FROM issues WHERE issue_id = ?", (issue_id,),
             ).fetchone()
             return row_to_issue(updated)
 
     def get_issues(
-        self,
-        project_path: str,
-        issue_filter: Optional[IssueFilter] = None,
+        self, project_path: str, issue_filter: Optional[IssueFilter] = None,
     ) -> List[TrackedIssue]:
-        """
-        Retrieve issues for a project with optional filtering.
-
-        Args:
-            project_path: The project root path to query.
-            issue_filter: Optional filter criteria.
-
-        Returns:
-            List of matching TrackedIssue objects.
-        """
+        """Retrieve issues for a project with optional filtering."""
         with self._get_connection() as conn:
             return query_issues(conn, project_path, issue_filter)
 
     def get_summary(self, project_path: str) -> IssuesSummary:
-        """
-        Generate an aggregated summary of issues for a project.
-
-        Args:
-            project_path: The project root path.
-
-        Returns:
-            IssuesSummary with counts broken down by status, severity, and type.
-        """
+        """Generate an aggregated summary of issues for a project."""
         with self._get_connection() as conn:
             return build_summary(conn, project_path)
 
     def get_issue(self, issue_id: str) -> Optional[TrackedIssue]:
-        """
-        Retrieve a single issue by its UUID.
-
-        Args:
-            issue_id: UUID of the issue.
-
-        Returns:
-            TrackedIssue if found, otherwise None.
-        """
+        """Retrieve a single issue by its UUID."""
         with self._get_connection() as conn:
             row = conn.execute(
-                "SELECT * FROM issues WHERE issue_id = ?",
-                (issue_id,),
+                "SELECT * FROM issues WHERE issue_id = ?", (issue_id,),
             ).fetchone()
             if not row:
                 return None
             return row_to_issue(row)
 
     def get_git_blame(self, file_path: str, line_number: int) -> Optional[Dict[str, str]]:
-        """
-        Run git blame on a specific line to identify the author and commit.
-
-        Args:
-            file_path: Absolute path to the file.
-            line_number: The 1-based line number to blame.
-
-        Returns:
-            Dict with 'author' and 'commit' keys, or None on failure.
-        """
+        """Run git blame on a specific line to identify the author and commit."""
         try:
             result = subprocess.run(
                 ["git", "blame", "-L", f"{line_number},{line_number}", "--porcelain", file_path],
-                capture_output=True,
-                text=True,
-                timeout=10,
+                capture_output=True, text=True, timeout=10,
             )
             if result.returncode != 0:
                 return None

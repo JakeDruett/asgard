@@ -11,17 +11,7 @@ from Asgard.Heimdall.Quality.models.smell_models import (
 
 
 class SmellVisitor(ast.NodeVisitor):
-    """
-    AST visitor to detect code smells.
-
-    Walks the AST and identifies various code smell patterns including:
-    - Large Class (too many methods or lines)
-    - Long Method (too many lines or statements)
-    - Long Parameter List
-    - Dead Code (pass-only methods)
-    - Complex Conditional (too many boolean operators)
-    - Feature Envy (tracks method calls to other objects)
-    """
+    """AST visitor to detect code smells including bloaters, dispensables, and couplers."""
 
     def __init__(
         self,
@@ -29,14 +19,7 @@ class SmellVisitor(ast.NodeVisitor):
         thresholds: SmellThresholds,
         categories: List[str],
     ):
-        """
-        Initialize the smell visitor.
-
-        Args:
-            file_path: Path to the file being analyzed
-            thresholds: Thresholds for smell detection
-            categories: List of enabled smell categories
-        """
+        """Initialize the smell visitor."""
         self.file_path = file_path
         self.thresholds = thresholds
         self.categories = categories
@@ -46,13 +29,7 @@ class SmellVisitor(ast.NodeVisitor):
         self.method_calls: Dict[str, List[str]] = defaultdict(list)
 
     def visit_ClassDef(self, node: ast.ClassDef) -> None:
-        """
-        Visit class definition to detect class-level smells.
-
-        Detects:
-        - Large Class (too many methods)
-        - Large Class (too many lines)
-        """
+        """Visit class definition to detect class-level smells."""
         old_class = self.current_class
         self.current_class = node.name
 
@@ -94,15 +71,7 @@ class SmellVisitor(ast.NodeVisitor):
         self.current_class = old_class
 
     def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
-        """
-        Visit function definition to detect method-level smells.
-
-        Detects:
-        - Long Method (too many lines)
-        - Long Method (too many statements)
-        - Long Parameter List
-        - Dead Code (pass-only methods)
-        """
+        """Visit function definition to detect method-level smells."""
         self._analyze_function(node)
 
     def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
@@ -212,11 +181,7 @@ class SmellVisitor(ast.NodeVisitor):
         self.generic_visit(node)
 
     def visit_Call(self, node: ast.Call) -> None:
-        """
-        Visit function calls to detect coupling smells.
-
-        Tracks method calls for Feature Envy detection.
-        """
+        """Visit function calls to track method calls for Feature Envy detection."""
         if SmellCategory.COUPLERS.value in self.categories:
             if isinstance(node.func, ast.Attribute):
                 if isinstance(node.func.value, ast.Name):
@@ -227,11 +192,7 @@ class SmellVisitor(ast.NodeVisitor):
         self.generic_visit(node)
 
     def visit_If(self, node: ast.If) -> None:
-        """
-        Visit if statements to detect complex conditionals.
-
-        Detects conditionals with too many boolean operators.
-        """
+        """Visit if statements to detect complex conditionals."""
         if SmellCategory.BLOATERS.value in self.categories:
             condition_complexity = self._count_boolean_operators(node.test)
             if condition_complexity > self.thresholds.complex_conditional_operators:
@@ -283,15 +244,7 @@ class SmellVisitor(ast.NodeVisitor):
         return count
 
     def get_feature_envy_smells(self) -> List[CodeSmell]:
-        """
-        Analyze collected method calls to detect Feature Envy.
-
-        Feature Envy occurs when a method uses methods/properties of another
-        object more than its own class.
-
-        Returns:
-            List of Feature Envy code smells
-        """
+        """Analyze collected method calls to detect Feature Envy."""
         smells: List[CodeSmell] = []
         if SmellCategory.COUPLERS.value not in self.categories:
             return smells
